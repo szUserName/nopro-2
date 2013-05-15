@@ -41,7 +41,7 @@ use MIME::Base64;
 our @tiresult: shared;
 our @ltiresult;
 use Tk;
-require Tk::ROText;
+use Tk::NoteBook;
 
 print "Running as UID $> at PID $$\n";
 
@@ -60,13 +60,13 @@ my @adpts = Net::Pcap::findalldevs(\$err);
 $numadpt = @adpts;
 print "$numadpt adapters found... ";
 
-$initheight = 64 + (($numadpt + 1) * 16);
-$initwidth = 500;
+$initheight = 76 + (($numadpt + 1) * 16);
+$initwidth = 220;
 
 my $TOP = MainWindow->new();
 $SIG{INT} = sub{ tosspacket("^qt]" . $iam); $TOP->focusForce; $TOP->destroy; };
 $TOP->title("NoPro");
-$TOP->minsize($initwidth, eval($initheight - 19));
+$TOP->minsize($initwidth, $initheight);
 $TOP->geometry($initwidth . "x" . $initheight . "+20+20");
 $TOP->packPropagate(1);
 #$TOP->Icon(-image => $TOP->Photo(-file=>"rigor.bmp"));
@@ -94,29 +94,25 @@ for ($g = 0;$g < $numadpt;$g++) {
 }
 $whatever = (($numadpt + 1) * 16) + 5;
 ## Choose handle
-$nicktext = $hl->ROText(-borderwidth => "0", -wrap => "none", -takefocus => "0")->place(-height => "16", -width => "50", -"y" => $whatever, -x => "5");
-$nicktext->insert("end", "Handle");
+$nicktext = $hl->Label(-text => "Handle")->place(-height => "16", -width => "50", -"y" => $whatever, -x => "5");
 $nick = $hl->Entry()->place(-height => "16", -relwidth => "1.0", -width => "-65", -"y" => $whatever, -x => "60");
 $nick->focus;
 ## Choose tripcode string
 $whatever += 16;
-$nidtext = $hl->ROText(-borderwidth => "0", -wrap => "none", -takefocus => "0")->place(-height => "16", -width => "50", -"y" => $whatever, -x => "5");
-$nidtext->insert("end", "ID");
+$nidtext = $hl->Label(-text => "ID")->place(-height => "16", -width => "50", -"y" => $whatever, -x => "5");
 $myid = "";
 $nid = $hl->Entry()->place(-height => "16", -relwidth => "1.0", -width => "-65", -"y" => $whatever, -x => "60");
 $nid->bind('<Key>' => [\&print_keysym,Ev('N'),$nid,\$myid]);
-## Choose encryption key - add checks later to make sure this fails modulus 8 before proceeding - perhaps pad/truncate to 8 to make it friendly
+## Choose encryption key - add checks later to pad this to 8 then truncate down to 56
 $whatever += 16;
-$nkeytext = $hl->ROText(-borderwidth => "0", -wrap => "none", -takefocus => "0")->place(-height => "16", -width => "50", -"y" => $whatever, -x => "5");
-$nkeytext->insert("end", "Key");
+$nkeytext = $hl->Label(-text => "Key")->place(-height => "16", -width => "50", -"y" => $whatever, -x => "5");
 $rendecu = "allcalma";
 $nkey = $hl->Entry()->place(-height => "16", -relwidth => "1.0", -width => "-65", -"y" => $whatever, -x => "60");
 $nkey->bind('<Key>' => [\&print_keysym,Ev('N'),$nkey,\$rendecu]);
 $nkey->insert('end',"*" x length($rendecu));
 ## Variable ethertype - Must be 4 hex or roof flies off
 $whatever += 16;
-$netypetext = $hl->ROText(-borderwidth => "0", -wrap => "none", -takefocus => "0")->place(-height => "16", -width => "50", -"y" => $whatever, -x => "5");
-$netypetext->insert("end", "Ethertype");
+$netypetext = $hl->Label(-text => "EType")->place(-height => "16", -width => "50", -"y" => $whatever, -x => "5");
 $ethertype = "0E0E";
 $netype = $hl->Entry()->place(-height => "16", -relwidth => "1.0", -width => "-65", -"y" => $whatever, -x => "60");
 $netype->insert('end',$ethertype);
@@ -124,10 +120,14 @@ $netype->insert('end',$ethertype);
 ## since we listen for all traffic anyways, set up tabs such that each tab is a chatroom, where the chatroom name is the ethertype.
 ## whenever you get a message that matches a chatroom you have open, push the data to the appropriate array that tracks messages for that ethertype/room
 ## then just populate that data to your $t widget when you switch to that tab
-## data structure will be %chatrooms{$ethertype}[messageindex]
-## shift/push messages in each anonymous array to control max buffer size, or push then negative range operator slice to max buffer size [-50..-1].  this keeps index 0 as the oldest message for easier for loop widget populating
+## data structure will be %chatrooms{$ethertype}[elements (0), widgets (1)][messageindex][handle,tripcode,message]
+## shift/push messageindex in each anonymous array to control max buffer size, or push then negative range operator slice to max buffer size [-50..-1].  this keeps index 0 as the oldest message for easier for loop widget populating
 ## Make 0E0E the default chatroom I guess
-## Caveat:  You'll be spammed with rubbish if you pick an ethertype in use on your network
+## Caveat:  You'll be spammed with rubbish if you pick an ethertype in use on your network.  Perhaps create a prefix for message data so that you can use common ethertypes: ^md]
+## save messages as raw data so that you can dynamically swap between blowfish keys, attempting to decipher each message for the current room each time you change the key
+## for the lazy hacker:  autoswap blowfish keys for each chatroom by setting the key to ethertype . defaultkey
+## autojoin rooms when you detect the appropriate newroom signal on an ethertype you don't currently have open: ^nr]
+## Caveat:  these prefixs are cleartext and could be signatured eventually.  for covert applications, add another cipher of the full payload with a hardcoded key
 
 MainLoop;
 
@@ -137,7 +137,7 @@ sub writequeue { ## Listen threads
 	my $tid = shift;
 	$nic = Net::Pcap::open_live($dnic, 9228, 0, 1, \$err) or die;
 	print "-\nListening on $dnic\n";
-	tosspacket("^jn]" . $iam);
+	tosspacket("^jn]" . $iam); ## send this for each room creation instead
 	Net::Pcap::loop($nic, -1, \&printPackets, '');
 }
 
@@ -176,7 +176,7 @@ sub printPackets { ## Parses packets into human readable
     $offset += 12; ## Jump past MAC addys
     ($etherall) = unpack 'H4', substr $data, $offset;
     $etherall = uc($etherall);
-    if($etherall eq $ethertype) {
+    if($etherall eq $ethertype) { # if exists $etherall in %chatrooms
 	$offset += 2;
 	$xdrstr = substr $data, $offset, (length($data) - $offset);
 	unless ($xdrstr =~ /^\^(kl|qt|jn)\]/) {
@@ -211,7 +211,24 @@ sub useThisNIC { ## create main tk and main burn loop
 	$nidtext->placeForget;
 	$nid->placeForget;
 	$dnic = $adpts[$useNIC];
-	$t = $hl->Scrolled(Text, -relief => "sunken", -borderwidth => "1", -setgrid => "false", -height => "32", -scrollbars => "oe", -wrap => "word", -takefocus => "0")->place(-relheight => "1.0", -height => "-28", -relwidth => "1.0", -width => "-102", -"y" => "5", -x => "5");
+	
+	$nb = $hl->NoteBook(-tabpadx => 0, -tabpady => 0)->place(-relheight => "1.0", -relwidth => "1.0");
+	
+	#$chatrooms{"New"} = $nb->add("New", -label => "New", -raisecmd=>$newroomentry->focus); ## create a sub that populates messsages, users, and tracks default focus for each tab
+	$chatrooms{"New"} = $nb->add("New", -label => "New");
+
+	$newroomtext = $chatrooms{"New"}->Label(-text => "EType")->place(-height => "16", -width => "50", -"y" => "76", -x => "5");
+	$newroomentry = $chatrooms{"New"}->Entry()->place(-height => "16", -relwidth => "1.0", -width => "-65", -"y" => "76", -x => "60"); ## enter key here should spawn a new room tab
+	$newroomentry->focus;
+	
+	## data structure for chatroom widgets %chatrooms{$ethertype}[0][entry(0),label(1),scrolled(2: not present in New tab)]
+	
+	#$chatrooms{"0E0E"} = $nb->add("0E0E", -label => "0E0E", -raisecmd=>$sentry->focus); ## create a sub that populates messsages, users, and tracks default focus for each tab
+	$chatrooms{"0E0E"} = $nb->add("0E0E", -label => "0E0E");
+
+	$nb->raise("0E0E");
+	
+	$t = $chatrooms{"0E0E"}->Scrolled(Text, -relief => "sunken", -borderwidth => "1", -setgrid => "false", -height => "32", -scrollbars => "oe", -wrap => "word", -takefocus => "0")->place(-relheight => "1.0", -height => "-28", -relwidth => "1.0", -width => "-102", -"y" => "5", -x => "5");
 	$t->mark(qw/set insert end/);
 	$t->tagConfigure("c1", -foreground => "#10AF10"); ## handle colour
 	$t->tagConfigure("c2", -foreground => "#CF9F10"); ## tripcode colour
@@ -219,9 +236,9 @@ sub useThisNIC { ## create main tk and main burn loop
 	$t->tagConfigure("q", -foreground => "#AF1010"); ## quit colour
 	$t->tagConfigure("j", -foreground => "#1010AF"); ## join colour
 
-	$stext = $hl->ROText(-borderwidth => "0", -wrap => "none", -takefocus => "0")->place(-relheight => "1.0", -height => "-26", -width => "91", -"y" => "5", -relx => "1.0", -x => "-98");
+	$stext = $chatrooms{"0E0E"}->Label(-anchor => 'nw')->place(-relheight => "1.0", -height => "-26", -width => "91", -"y" => "5", -relx => "1.0", -x => "-98");
 	
-	$sentry = $hl->Entry()->place(-height => "16", -relwidth => "1.0", -width => "-102", -rely => "1.0", -"y" => "-21", -x => "5");
+	$sentry = $chatrooms{"0E0E"}->Entry()->place(-height => "16", -relwidth => "1.0", -width => "-102", -rely => "1.0", -"y" => "-21", -x => "5");
 	$sentry->bind('<Return>' ,sub{broadcast(); Tk->break; });
 	$sentry->focus;
 	$lastud = 0;
@@ -279,7 +296,7 @@ sub useThisNIC { ## create main tk and main burn loop
 			}
 		}
 		@ltiresult = ();
-		$stext->delete('0.0','end');
+		$precat = "";
 		foreach my $uname (sort keys %ul) {
 			if (($stamp - $ul{$uname}) > 500) {
 				delete $ul{$uname};
@@ -287,10 +304,10 @@ sub useThisNIC { ## create main tk and main burn loop
 				$t->yview('moveto','1.0');
 			}
 			else {
-				$precat = $uname . "\n";
-				$stext->insert("end", $precat);
+				$precat .= $uname . "\n";
 			}
 		}
+		$stext->configure(-text => $precat);
 	}
 }
 
