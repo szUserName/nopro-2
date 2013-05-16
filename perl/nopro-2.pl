@@ -39,6 +39,7 @@ use MIME::Base64;
 
 
 our @tiresult: shared;
+our @trackrooms: shared;
 our @ltiresult;
 use Tk;
 use Tk::NoteBook;
@@ -50,8 +51,9 @@ our $dnic;
 our $iam;
 our $myid;
 our @gg;
-our %ul;
 our $ethertype;
+our %chatrooms = ();
+our $nb;
 
 $|++;
 
@@ -64,7 +66,7 @@ $initheight = 76 + (($numadpt + 1) * 16);
 $initwidth = 220;
 
 my $TOP = MainWindow->new();
-$SIG{INT} = sub{ tosspacket("^qt]" . $iam); $TOP->focusForce; $TOP->destroy; };
+$SIG{INT} = sub{ quiting(); $TOP->focusForce; $TOP->destroy; };
 $TOP->title("NoPro");
 $TOP->minsize($initwidth, $initheight);
 $TOP->geometry($initwidth . "x" . $initheight . "+20+20");
@@ -84,7 +86,7 @@ $menu = $TOP->Menu(-type => "menubar");
 $TOP->configure(-menu => $menu);
 
 my $f = $menu->cascade(-label => "~File", -tearoff => "0");
-$f->command(-label => "E~xit", -command => sub{tosspacket("^qt]" . $iam); $TOP->destroy;});
+$f->command(-label => "E~xit", -command => sub{quiting(); $TOP->destroy;});
 ## Choose adapter - This choice advances to the next screen
 for ($g = 0;$g < $numadpt;$g++) {
 	$dnic = $adpts[$g];
@@ -110,34 +112,44 @@ $rendecu = "allcalma";
 $nkey = $hl->Entry()->place(-height => "16", -relwidth => "1.0", -width => "-65", -"y" => $whatever, -x => "60");
 $nkey->bind('<Key>' => [\&print_keysym,Ev('N'),$nkey,\$rendecu]);
 $nkey->insert('end',"*" x length($rendecu));
-## Variable ethertype - Must be 4 hex or roof flies off
+## Variable ethertype - Must be 4 hex or roof flies off, add checks later
 $whatever += 16;
 $netypetext = $hl->Label(-text => "EType")->place(-height => "16", -width => "50", -"y" => $whatever, -x => "5");
 $ethertype = "0E0E";
 $netype = $hl->Entry()->place(-height => "16", -relwidth => "1.0", -width => "-65", -"y" => $whatever, -x => "60");
 $netype->insert('end',$ethertype);
-## TO ADD: ok, so here is the idea:
-## since we listen for all traffic anyways, set up tabs such that each tab is a chatroom, where the chatroom name is the ethertype.
-## whenever you get a message that matches a chatroom you have open, push the data to the appropriate array that tracks messages for that ethertype/room
-## then just populate that data to your $t widget when you switch to that tab
-## data structure will be %chatrooms{$ethertype}[elements (0), widgets (1)][messageindex][handle,tripcode,message]
-## shift/push messageindex in each anonymous array to control max buffer size, or push then negative range operator slice to max buffer size [-50..-1].  this keeps index 0 as the oldest message for easier for loop widget populating
-## Make 0E0E the default chatroom I guess
-## Caveat:  You'll be spammed with rubbish if you pick an ethertype in use on your network.  Perhaps create a prefix for message data so that you can use common ethertypes: ^md]
-## save messages as raw data so that you can dynamically swap between blowfish keys, attempting to decipher each message for the current room each time you change the key
-## for the lazy hacker:  autoswap blowfish keys for each chatroom by setting the key to ethertype . defaultkey
-## autojoin rooms when you detect the appropriate newroom signal on an ethertype you don't currently have open: ^nr]
-## Caveat:  these prefixs are cleartext and could be signatured eventually.  for covert applications, add another cipher of the full payload with a hardcoded key
+
+## data structure is %chatrooms{$ethertype}[
+##						widgets (0) [tab(0),entry(1),label(2),scrolled(3: not present in New tab)]
+##						messages (1) [messageindex][handle,tripcode,message]
+##						userlist (2) {username => lasttimestamp}
+##					   ]
+
+## FEATURES TO ADD:
+## 1. shift/push messageindex in each anonymous array to control max buffer size, or push then negative range operator slice to max buffer size [-50..-1].  this keeps index 0 as the oldest message for easier for loop widget populating
+## 2. Caveat:  You'll be spammed with rubbish if you pick an ethertype in use on your network.  Perhaps create a prefix for message data so that you can use common ethertypes: ^md]
+## 3. Save messages as raw data so that you can dynamically swap between blowfish keys, attempting to decipher each message for the current room each time you change the key
+## 4. For the lazy hacker:  autoswap blowfish keys for each chatroom by setting the key to ethertype . defaultkey
+## 5. Autojoin rooms when you detect the appropriate newroom signal on an ethertype you don't currently have open: ^nr]
+## 6. Caveat:  these prefixs are cleartext and could be signatured eventually.  for covert applications, add another cipher of the full payload with a hardcoded key
 
 MainLoop;
+
+sub quiting {
+	foreach my $quittar (keys %chatrooms) {
+		unless ($quittar eq "New") {
+			tosspacket($quittar,"^qt]" . $iam);
+		}
+	}
+}
 
 sub writequeue { ## Listen threads
 	threads->self->detach;
 	threads->yield;
+	our %roomtrack = ();
 	my $tid = shift;
 	$nic = Net::Pcap::open_live($dnic, 9228, 0, 1, \$err) or die;
 	print "-\nListening on $dnic\n";
-	tosspacket("^jn]" . $iam); ## send this for each room creation instead
 	Net::Pcap::loop($nic, -1, \&printPackets, '');
 }
 
@@ -176,23 +188,63 @@ sub printPackets { ## Parses packets into human readable
     $offset += 12; ## Jump past MAC addys
     ($etherall) = unpack 'H4', substr $data, $offset;
     $etherall = uc($etherall);
-    if($etherall eq $ethertype) { # if exists $etherall in %chatrooms
+    { ## every packet, check to see if you've joined new rooms since last packet
+		lock @trackrooms;
+		foreach my $roomname (@trackrooms) {
+			if ($roomname =~ /\+(.*)/) {
+				$roomtrack{$1}++;
+			}
+			else {
+				delete $roomtrack{$roomname};
+			}
+		}
+		@trackrooms = ();
+		cond_signal(@trackrooms);
+    }
+    if (exists $roomtrack{$etherall}) {
 	$offset += 2;
 	$xdrstr = substr $data, $offset, (length($data) - $offset);
-	unless ($xdrstr =~ /^\^(kl|qt|jn)\]/) {
-		if ($xdrstr =~ /^(.*?\s\[.*?\]\s)/) {
-			$xdrstr = $1 . concise($rendecu,$',1);
-		}
-	}
 	{
 		lock @tiresult;
-		push @tiresult, $xdrstr;
+		push @tiresult, $etherall . $xdrstr;
 		cond_signal(@tiresult);
 	}
     }
 }
 
+sub newroom {
+	my ($rewm) = shift;
+	
+	$rewm = uc($rewm);
+	#$chatrooms{$rewm} = $nb->add($rewm, -label => $rewm, -raisecmd=>$sentry->focus); ## create a sub that populates messsages, users, and tracks default focus for each tab
+	$chatrooms{$rewm}[0][0] = $nb->add($rewm, -label => $rewm);
+
+	$nb->raise($rewm);
+	
+	$chatrooms{$rewm}[0][3] = $chatrooms{$rewm}[0][0]->Scrolled(Text, -relief => "sunken", -borderwidth => "1", -setgrid => "false", -height => "32", -scrollbars => "oe", -wrap => "word", -takefocus => "0")->place(-relheight => "1.0", -height => "-28", -relwidth => "1.0", -width => "-102", -"y" => "5", -x => "5");
+	$chatrooms{$rewm}[0][3]->mark(qw/set insert end/);
+	$chatrooms{$rewm}[0][3]->tagConfigure("c1", -foreground => "#10AF10"); ## handle colour
+	$chatrooms{$rewm}[0][3]->tagConfigure("c2", -foreground => "#CF9F10"); ## tripcode colour
+	$chatrooms{$rewm}[0][3]->tagConfigure("c3", -foreground => "#000000"); ## text colour
+	$chatrooms{$rewm}[0][3]->tagConfigure("q", -foreground => "#AF1010"); ## quit colour
+	$chatrooms{$rewm}[0][3]->tagConfigure("j", -foreground => "#1010AF"); ## join colour
+
+	$chatrooms{$rewm}[0][2] = $chatrooms{$rewm}[0][0]->Label(-anchor => 'nw')->place(-relheight => "1.0", -height => "-26", -width => "91", -"y" => "5", -relx => "1.0", -x => "-98");
+	
+	$chatrooms{$rewm}[0][1] = $chatrooms{$rewm}[0][0]->Entry()->place(-height => "16", -relwidth => "1.0", -width => "-102", -rely => "1.0", -"y" => "-21", -x => "5");
+	$chatrooms{$rewm}[0][1]->bind('<Return>' ,sub{broadcast($rewm); Tk->break; });
+	$chatrooms{$rewm}[0][1]->focus;
+	{ ## this essentially enables sniffing for this ethertype
+		lock @trackrooms;
+		push @trackrooms, "+" . $rewm; ## Omit the + sign for leaving a room
+		cond_signal(@trackrooms);
+	}
+	tosspacket($rewm, "^jn]" . $iam); ## send this for each room creation instead
+}
+
 sub useThisNIC { ## create main tk and main burn loop
+	$TOP->configure(-height => ($initheight + 50), -width => ($initwidth + 100));
+	$hl->configure(-height => ($initheight + 50), -width => ($initwidth + 100));
 	my ($useNIC) = @_;
 	$iam = $nick->get;
 	$ethertype = uc($netype->get);
@@ -202,7 +254,7 @@ sub useThisNIC { ## create main tk and main burn loop
 	chomp($myid); ## get rid of newline cruft
 	$myid =~ s/=//g; ## get rid of base64 cruft
 	$myid = substr $myid, -6; ## truncate to the last 6 chars so this doesnt get out of hand.  Being lossy, this also makes the cipher one-way
-	$TOP->title("NoPro - $iam [$myid] $ethertype " . ("*" x length($rendecu)));
+	$TOP->title("NoPro - $iam [$myid] " . ("*" x length($rendecu)));
 	foreach my $zong (@gg) {
 		$zong->placeForget;
 	}
@@ -214,44 +266,32 @@ sub useThisNIC { ## create main tk and main burn loop
 	
 	$nb = $hl->NoteBook(-tabpadx => 0, -tabpady => 0)->place(-relheight => "1.0", -relwidth => "1.0");
 	
-	#$chatrooms{"New"} = $nb->add("New", -label => "New", -raisecmd=>$newroomentry->focus); ## create a sub that populates messsages, users, and tracks default focus for each tab
-	$chatrooms{"New"} = $nb->add("New", -label => "New");
+	#$chatrooms{"New"}[0][0] = $nb->add("New", -label => "New", -raisecmd=>$chatrooms{"New"}[0][1]->focus); ## create a sub that populates messsages, users, and tracks default focus for each tab
+	$chatrooms{"New"}[0][0] = $nb->add("New", -label => "New");
 
-	$newroomtext = $chatrooms{"New"}->Label(-text => "EType")->place(-height => "16", -width => "50", -"y" => "76", -x => "5");
-	$newroomentry = $chatrooms{"New"}->Entry()->place(-height => "16", -relwidth => "1.0", -width => "-65", -"y" => "76", -x => "60"); ## enter key here should spawn a new room tab
-	$newroomentry->focus;
+	$chatrooms{"New"}[0][2] = $chatrooms{"New"}[0][0]->Label(-text => "EType")->place(-height => "16", -width => "50", -"y" => "76", -x => "5");
+	$chatrooms{"New"}[0][1] = $chatrooms{"New"}[0][0]->Entry()->place(-height => "16", -relwidth => "1.0", -width => "-65", -"y" => "76", -x => "60"); ## enter key here should spawn a new room tab
+	#$chatrooms{"New"}[0][1]->bind('<Return>' => [\&newroom,$chatrooms{"New"}[0][1]->get]);
+	$chatrooms{"New"}[0][1]->bind('<Return>' => sub{ newroom($chatrooms{"New"}[0][1]->get); });
+	$chatrooms{"New"}[0][1]->focus;
 	
-	## data structure for chatroom widgets %chatrooms{$ethertype}[0][entry(0),label(1),scrolled(2: not present in New tab)]
-	
-	#$chatrooms{"0E0E"} = $nb->add("0E0E", -label => "0E0E", -raisecmd=>$sentry->focus); ## create a sub that populates messsages, users, and tracks default focus for each tab
-	$chatrooms{"0E0E"} = $nb->add("0E0E", -label => "0E0E");
+	newroom("0E0E");
 
-	$nb->raise("0E0E");
-	
-	$t = $chatrooms{"0E0E"}->Scrolled(Text, -relief => "sunken", -borderwidth => "1", -setgrid => "false", -height => "32", -scrollbars => "oe", -wrap => "word", -takefocus => "0")->place(-relheight => "1.0", -height => "-28", -relwidth => "1.0", -width => "-102", -"y" => "5", -x => "5");
-	$t->mark(qw/set insert end/);
-	$t->tagConfigure("c1", -foreground => "#10AF10"); ## handle colour
-	$t->tagConfigure("c2", -foreground => "#CF9F10"); ## tripcode colour
-	$t->tagConfigure("c3", -foreground => "#000000"); ## text colour
-	$t->tagConfigure("q", -foreground => "#AF1010"); ## quit colour
-	$t->tagConfigure("j", -foreground => "#1010AF"); ## join colour
-
-	$stext = $chatrooms{"0E0E"}->Label(-anchor => 'nw')->place(-relheight => "1.0", -height => "-26", -width => "91", -"y" => "5", -relx => "1.0", -x => "-98");
-	
-	$sentry = $chatrooms{"0E0E"}->Entry()->place(-height => "16", -relwidth => "1.0", -width => "-102", -rely => "1.0", -"y" => "-21", -x => "5");
-	$sentry->bind('<Return>' ,sub{broadcast(); Tk->break; });
-	$sentry->focus;
 	$lastud = 0;
 	threads->new(\&writequeue, $useNIC);
 	
 	while (1) { ##  main burn loop, checks for new messages, handles updates to ulist and does keepalive pings
-		select(undef, undef, undef, 0.01); ## Burn Slower
+		select(undef, undef, undef, 0.02); ## Burn Slower
 		$TOP->update();
 		($sec,$min,$hora,$diem,undef,undef) = localtime(time);
 		$stamp = ($diem * 86400) + ($hora * 3600) + ($min * 60) + $sec;
 		if (($stamp - $lastud) > 300) {
 			$lastud = $stamp;
-			tosspacket("^kl]" . $iam);
+			foreach my $imalive (keys %chatrooms) { ## This probably gets loud, set option to surpress
+				unless ($imalive eq "New") {
+					tosspacket($imalive,"^kl]" . $iam);
+				}
+			}
 		}
 		{
 			lock @tiresult;
@@ -261,69 +301,76 @@ sub useThisNIC { ## create main tk and main burn loop
 			@tiresult = ();
 			cond_signal(@tiresult);
 		}
-		foreach (@ltiresult) {
-			if (/^\^kl\]/) {
+		foreach my $lti (@ltiresult) {
+			$ltitype = substr $lti, 0, 4;
+			$lti = substr $lti, 4, (length($lti) - 4);
+			if ($lti =~ /^\^kl\]/) {
 				$thisguy = $';
-				$ul{$thisguy} = $stamp;
+				$chatrooms{$ltitype}[2]{$thisguy} = $stamp;
 			}
-			elsif (/^\^jn\]/) {
+			elsif ($lti =~ /^\^jn\]/) {
 				$thisguy = $';
-				unless (exists $ul{$thisguy}) {
+				unless (exists $chatrooms{$ltitype}[2]{$thisguy}) {
 					$precat = "\n" . $thisguy . " joined";
-					$t->insert('end',$precat,"j");
-					$t->yview('moveto','1.0');
+					$chatrooms{$ltitype}[0][3]->insert('end',$precat,"j");
+					$chatrooms{$ltitype}[0][3]->yview('moveto','1.0');
 				}
-				$ul{$thisguy} = $stamp;
-				tosspacket("^kl]" . $iam) unless $thisguy eq $iam;
+				$chatrooms{$ltitype}[2]{$thisguy} = $stamp;
+				tosspacket($ltitype,"^kl]" . $iam) unless $thisguy eq $iam;
 			}
-			elsif (/^\^qt\]/) {
+			elsif ($lti =~ /^\^qt\]/) {
 				$thisguy = $';
-				if (exists $ul{$thisguy}) {
-					delete $ul{$thisguy};
+				if (exists $chatrooms{$ltitype}[2]{$thisguy}) {
+					delete $chatrooms{$ltitype}[2]{$thisguy};
 					$precat = "\n" . $thisguy . " left";
-					$t->insert('end',$precat,"q");
-					$t->yview('moveto','1.0');
+					$chatrooms{$ltitype}[0][3]->insert('end',$precat,"q");
+					$chatrooms{$ltitype}[0][3]->yview('moveto','1.0');
 				}
 			}
-			else {
-				$thisguy = $_ ;
+			elsif ($lti =~ /^(.*?\s\[.*?\]\s)/) {
+				$thisguy = $1 . concise($rendecu,$',1);
 				if ($thisguy =~ /^(.*?)\s(\[.*?\])\s/) {
-					$t->insert('end',"\n" . $1 . " ","c1");
-					$t->insert('end',$2 . " ","c2");
-					$t->insert('end',$',"c3");
-					$t->yview('moveto','1.0');
+					$chatrooms{$ltitype}[0][3]->insert('end',"\n" . $1 . " ","c1");
+					$chatrooms{$ltitype}[0][3]->insert('end',$2 . " ","c2");
+					$chatrooms{$ltitype}[0][3]->insert('end',$',"c3");
+					$chatrooms{$ltitype}[0][3]->yview('moveto','1.0');
 				}
 			}
 		}
 		@ltiresult = ();
-		$precat = "";
-		foreach my $uname (sort keys %ul) {
-			if (($stamp - $ul{$uname}) > 500) {
-				delete $ul{$uname};
-				$t->insert('end',"\n$uname timed out","q");
-				$t->yview('moveto','1.0');
-			}
-			else {
-				$precat .= $uname . "\n";
+		foreach my $checkfordead (keys %chatrooms) {
+			unless ($checkfordead eq "New") {
+				$precat = "";
+				foreach my $uname (sort keys %{$chatrooms{$checkfordead}[2]}) {
+					if (($stamp - $chatrooms{$checkfordead}[2]{$uname}) > 700) { ## allow two update intervals before assuming gone
+						delete $chatrooms{$checkfordead}[2]{$uname};
+						$chatrooms{$checkfordead}[0][3]->insert('end',"\n$uname timed out","q");
+						$chatrooms{$checkfordead}[0][3]->yview('moveto','1.0');
+					}
+					else {
+						$precat .= $uname . "\n";
+					}
+				}
+				$chatrooms{$checkfordead}[0][2]->configure(-text => $precat);
 			}
 		}
-		$stext->configure(-text => $precat);
 	}
 }
 
 sub tosspacket {
-	my ($payload) = shift;
+	my ($tptype,$payload) = @_;
 	my $soy = Win32::NetPacket->new(adapter_name => $dnic) or die $@;
-	$soyeah =  "\xFF\xFF\xFF\xFF\xFF\xFF" . "\x00\xAA\xBB\xCC\xDD\xEE" . pack("H*",$ethertype) . $payload;
+	$soyeah =  "\xFF\xFF\xFF\xFF\xFF\xFF" . "\x00\xAA\xBB\xCC\xDD\xEE" . pack("H*",$tptype) . $payload;
 	## TO ADD: If ^^ are odd bits, this will be treated as a multicast MAC address and SHOULD be broadcasted as well, since many devices don't distinguish between broadcast and multicast.  Might be useful for extra evasion.
 	$success = $soy->SendPacket($soyeah);
 }
 
 sub broadcast {
-	$datums = $sentry->get();
-	$sentry->delete(0.0,'end');
+	my ($betype) = shift;
+	$datums = $chatrooms{$betype}[0][1]->get();
+	$chatrooms{$betype}[0][1]->delete(0.0,'end');
 	$datums = concise($rendecu,$datums,0);
-	tosspacket($iam . " [" . $myid . "] " . $datums);
+	tosspacket($betype,$iam . " [" . $myid . "] " . $datums);
 }
 
 sub print_keysym { ## masks entry fields, input is KeyPressed, Reference to Entry Widget, Reference to Value Scalar
