@@ -7,6 +7,31 @@
 ## Fait par TUW
 ## Mai13
 
+## DATA STRUCTURE:
+## %chatrooms{$ethertype}[
+##				widgets (0) [tab(0),entry(1),label(2),scrolled(3: not present in New tab)]
+##				messages (1) [messageindex][handle,tripcode,message]
+##				userlist (2) {username => lasttimestamp}
+##			   ]
+
+##  FEATURES TO ADD:
+##  1. shift/push messageindex in each anonymous array to control max buffer size, or push then negative range operator slice to max buffer size [-50..-1].  this keeps index 0 as the oldest message for easier for loop widget populating
+##  2. Caveat:  You'll be spammed with rubbish if you pick an ethertype in use on your network.  Perhaps create a prefix for message data so that you can use common ethertypes: ^md]
+##  3. Save messages as raw data so that you can dynamically swap between blowfish keys, attempting to decipher each message for the current room each time you change the key
+##  4. For the lazy hacker:  autoswap blowfish keys for each chatroom by setting the key to ethertype.encryptkey (OR ethertype.ethertype for the security oblivious)
+##  5. Autojoin rooms when you detect the appropriate newroom signal on an ethertype you don't currently have open: ^nr]
+##  6. Caveat:  these prefixs are cleartext and could be signatured eventually.  for covert applications, add another cipher of the full payload with a hardcoded key
+##  7. Turn a tab red when it has an update
+##  8. Bind Port to NoPro proxy
+##  9. Reverse Port to NoPro proxy
+## 10. IO to NoPro proxy
+## 11. Prefix for pushing files over chat client
+## 12. Move all prefixes to non-ASCII to slow down junior forensics investigators
+## 13. Encipher all comms, except perhaps prefixes, as those are used to discern nopro prefixes from legitimate data
+## 14. Add option to surpress keepalives, joins, and parts to keep them from getting too loud on the wire
+## 15. Add button to leave a room (be sure to update shared array @trackrooms)
+
+## INSTALLING DEPENDANCIES:
 ## dead for perl 5.16 ## ppm install http://www.bribes.org/perl/ppm/Win32-NetPacket.ppd
 ## instead!
 ## 	get your 3.1 winpcap and 3.1 wpdpack from  http://www.winpcap.org/archive/  (3.1 is important because it has ntddndis.h)
@@ -19,6 +44,11 @@
 ## ppm install http://theoryx5.uwinnipeg.ca/ppms/Crypt-Blowfish.ppd
 ## ppm install Tk
 ## ppm install Tk-ROText
+
+## BORKED
+## Still needs automatic toplevel resizing after NIC is selected
+## Still needs entry validation prior to tab creation
+## Perhaps track and transmit your own keepalives for each tab independantly
 
 #perl2exe_include "attributes.pm"
 #perl2exe_include "Tk/Photo.pm"
@@ -36,17 +66,14 @@ use Net::Pcap;
 use Win32::NetPacket ':mode';  
 use Crypt::Blowfish_PP;
 use MIME::Base64;
+use Tk;
+use Tk::NoteBook;
 
 
 our @tiresult: shared;
 our @trackrooms: shared;
 our @ltiresult;
-use Tk;
-use Tk::NoteBook;
-
-print "Running as UID $> at PID $$\n";
-
-our $nic; ## init variable globally
+our $nic;
 our $dnic;
 our $iam;
 our $myid;
@@ -56,6 +83,8 @@ our %chatrooms = ();
 our $nb;
 
 $|++;
+
+print "Running as UID $> at PID $$\n";
 
 my @adpts = Net::Pcap::findalldevs(\$err);
 @adpts > 0 or die "No adapters installed !\n";
@@ -118,20 +147,6 @@ $netypetext = $hl->Label(-text => "EType")->place(-height => "16", -width => "50
 $ethertype = "0E0E";
 $netype = $hl->Entry()->place(-height => "16", -relwidth => "1.0", -width => "-65", -"y" => $whatever, -x => "60");
 $netype->insert('end',$ethertype);
-
-## data structure is %chatrooms{$ethertype}[
-##						widgets (0) [tab(0),entry(1),label(2),scrolled(3: not present in New tab)]
-##						messages (1) [messageindex][handle,tripcode,message]
-##						userlist (2) {username => lasttimestamp}
-##					   ]
-
-## FEATURES TO ADD:
-## 1. shift/push messageindex in each anonymous array to control max buffer size, or push then negative range operator slice to max buffer size [-50..-1].  this keeps index 0 as the oldest message for easier for loop widget populating
-## 2. Caveat:  You'll be spammed with rubbish if you pick an ethertype in use on your network.  Perhaps create a prefix for message data so that you can use common ethertypes: ^md]
-## 3. Save messages as raw data so that you can dynamically swap between blowfish keys, attempting to decipher each message for the current room each time you change the key
-## 4. For the lazy hacker:  autoswap blowfish keys for each chatroom by setting the key to ethertype . defaultkey
-## 5. Autojoin rooms when you detect the appropriate newroom signal on an ethertype you don't currently have open: ^nr]
-## 6. Caveat:  these prefixs are cleartext and could be signatured eventually.  for covert applications, add another cipher of the full payload with a hardcoded key
 
 MainLoop;
 
@@ -216,9 +231,7 @@ sub newroom {
 	my ($rewm) = shift;
 	
 	$rewm = uc($rewm);
-	#$chatrooms{$rewm} = $nb->add($rewm, -label => $rewm, -raisecmd=>$sentry->focus); ## create a sub that populates messsages, users, and tracks default focus for each tab
-	$chatrooms{$rewm}[0][0] = $nb->add($rewm, -label => $rewm);
-
+	$chatrooms{$rewm}[0][0] = $nb->add($rewm, -label => $rewm, -raisecmd => sub { raisefocus($rewm) });
 	$nb->raise($rewm);
 	
 	$chatrooms{$rewm}[0][3] = $chatrooms{$rewm}[0][0]->Scrolled(Text, -relief => "sunken", -borderwidth => "1", -setgrid => "false", -height => "32", -scrollbars => "oe", -wrap => "word", -takefocus => "0")->place(-relheight => "1.0", -height => "-28", -relwidth => "1.0", -width => "-102", -"y" => "5", -x => "5");
@@ -240,6 +253,14 @@ sub newroom {
 		cond_signal(@trackrooms);
 	}
 	tosspacket($rewm, "^jn]" . $iam); ## send this for each room creation instead
+}
+
+sub raisefocus{
+	$tabname = shift;
+	if ($chatrooms{$tabname}[0][1]) { ## This keeps raisefocus from raising errors before the entry widgets are defined
+		$chatrooms{$tabname}[0][1]->focus;
+	}
+
 }
 
 sub useThisNIC { ## create main tk and main burn loop
@@ -266,12 +287,9 @@ sub useThisNIC { ## create main tk and main burn loop
 	
 	$nb = $hl->NoteBook(-tabpadx => 0, -tabpady => 0)->place(-relheight => "1.0", -relwidth => "1.0");
 	
-	#$chatrooms{"New"}[0][0] = $nb->add("New", -label => "New", -raisecmd=>$chatrooms{"New"}[0][1]->focus); ## create a sub that populates messsages, users, and tracks default focus for each tab
-	$chatrooms{"New"}[0][0] = $nb->add("New", -label => "New");
-
+	$chatrooms{"New"}[0][0] = $nb->add("New", -label => "New", -raisecmd => sub { raisefocus("New") });
 	$chatrooms{"New"}[0][2] = $chatrooms{"New"}[0][0]->Label(-text => "EType")->place(-height => "16", -width => "50", -"y" => "76", -x => "5");
 	$chatrooms{"New"}[0][1] = $chatrooms{"New"}[0][0]->Entry()->place(-height => "16", -relwidth => "1.0", -width => "-65", -"y" => "76", -x => "60"); ## enter key here should spawn a new room tab
-	#$chatrooms{"New"}[0][1]->bind('<Return>' => [\&newroom,$chatrooms{"New"}[0][1]->get]);
 	$chatrooms{"New"}[0][1]->bind('<Return>' => sub{ newroom($chatrooms{"New"}[0][1]->get); });
 	$chatrooms{"New"}[0][1]->focus;
 	
@@ -287,7 +305,7 @@ sub useThisNIC { ## create main tk and main burn loop
 		$stamp = ($diem * 86400) + ($hora * 3600) + ($min * 60) + $sec;
 		if (($stamp - $lastud) > 300) {
 			$lastud = $stamp;
-			foreach my $imalive (keys %chatrooms) { ## This probably gets loud, set option to surpress
+			foreach my $imalive (keys %chatrooms) { ## This probably gets loud
 				unless ($imalive eq "New") {
 					tosspacket($imalive,"^kl]" . $iam);
 				}
@@ -304,6 +322,9 @@ sub useThisNIC { ## create main tk and main burn loop
 		foreach my $lti (@ltiresult) {
 			$ltitype = substr $lti, 0, 4;
 			$lti = substr $lti, 4, (length($lti) - 4);
+			if ($lti ne $nb->raised) {
+				## add code here to make tab label red or something when you get a message in a room that isnt your current tab
+			}
 			if ($lti =~ /^\^kl\]/) {
 				$thisguy = $';
 				$chatrooms{$ltitype}[2]{$thisguy} = $stamp;
