@@ -30,6 +30,7 @@
 ## 13. Encipher all comms, except perhaps prefixes, as those are used to discern nopro prefixes from legitimate data
 ## 14. Add option to surpress keepalives, joins, and parts to keep them from getting too loud on the wire
 ## 15. Add button to leave a room (be sure to update shared array @trackrooms)
+## 16. RARP detection for your source mac, then dynamic mac reallocation.  Similar detection of mac scanners.  Perhaps jump to legit OUIs at http://standards.ieee.org/regauth/oui/index.shtml
 
 ## INSTALLING DEPENDANCIES:
 ## dead for perl 5.16 ## ppm install http://www.bribes.org/perl/ppm/Win32-NetPacket.ppd
@@ -153,7 +154,7 @@ MainLoop;
 sub quiting {
 	foreach my $quittar (keys %chatrooms) {
 		unless ($quittar eq "New") {
-			tosspacket($quittar,"^qt]" . $iam);
+			tosspacket($quittar,3,$iam);
 		}
 	}
 }
@@ -217,11 +218,16 @@ sub printPackets { ## Parses packets into human readable
 		cond_signal(@trackrooms);
     }
     if (exists $roomtrack{$etherall}) {
-	$offset += 2;
-	$xdrstr = substr $data, $offset, (length($data) - $offset);
+	$offset += 2; ## skip over ethertype
+	$xdrstr = unpack('B*', substr($data, $offset, (length($data) - $offset)));  ## dump the whole fucker to binary
+	($mtype,$remainder) = unpack('a2a*', $xdrstr); ## grab up two bits for message type
+	$mtype = parsehdra($mtype);
+	$remainder = substr($remainder, 0, (length($remainder) - 6)); ## remove 6 bit padding
+	$repackxdrstr = pack('B*',$remainder);
+	@peasy = ("","^jn]","^kl]","^qt]"); ## conversion table for legacy message type handling
 	{
 		lock @tiresult;
-		push @tiresult, $etherall . $xdrstr;
+		push @tiresult, $etherall . $peasy[$mtype] . $repackxdrstr;
 		cond_signal(@tiresult);
 	}
     }
@@ -252,7 +258,7 @@ sub newroom {
 		push @trackrooms, "+" . $rewm; ## Omit the + sign for leaving a room
 		cond_signal(@trackrooms);
 	}
-	tosspacket($rewm, "^jn]" . $iam); ## send this for each room creation instead
+	tosspacket($rewm,1,$iam);
 }
 
 sub raisefocus{
@@ -307,7 +313,7 @@ sub useThisNIC { ## create main tk and main burn loop
 			$lastud = $stamp;
 			foreach my $imalive (keys %chatrooms) { ## This probably gets loud
 				unless ($imalive eq "New") {
-					tosspacket($imalive,"^kl]" . $iam);
+					tosspacket($imalive,2,$iam);
 				}
 			}
 		}
@@ -337,7 +343,7 @@ sub useThisNIC { ## create main tk and main burn loop
 					$chatrooms{$ltitype}[0][3]->yview('moveto','1.0');
 				}
 				$chatrooms{$ltitype}[2]{$thisguy} = $stamp;
-				tosspacket($ltitype,"^kl]" . $iam) unless $thisguy eq $iam;
+				tosspacket($ltitype,2,$iam) unless $thisguy eq $iam;
 			}
 			elsif ($lti =~ /^\^qt\]/) {
 				$thisguy = $';
@@ -379,9 +385,22 @@ sub useThisNIC { ## create main tk and main burn loop
 }
 
 sub tosspacket {
-	my ($tptype,$payload) = @_;
+	## Message \b00, Join \b01, Keepalive \b10, Quit \b11
+	my ($tptype,$ptype,$payload) = @_;
+	## manual binary generation, to keep automatic zero padding from occuring	
+	$bptype = unpack('B8',$ptype);
+	($filler,$aptype) = unpack('a6a2', $bptype); ## grab just two bits of data for packet type
+	
+	$pp = unpack('B*',$payload);
+	$pa = unpack('a*', $pp); ## convert ascii payload to bits
+	
+	$padding = int(rand(64));
+	$bpadding = unpack('B8',$padding);
+	($moarfiller,$bp) = unpack('a2a6', $bpadding); ## generate six bits of random data for padding
+
 	my $soy = Win32::NetPacket->new(adapter_name => $dnic) or die $@;
-	$soyeah =  "\xFF\xFF\xFF\xFF\xFF\xFF" . "\x00\xAA\xBB\xCC\xDD\xEE" . pack("H*",$tptype) . $payload;
+
+	$soyeah =  "\xFF\xFF\xFF\xFF\xFF\xFF" . "\x00\xAA\xBB\xCC\xDD\xEE" . pack("H*",$tptype) . pack('B*',$aptype . $pa . $bp); ## pack two bits of ptype, payload, and six random bits.  This keeps ascii from being displayed overtly on sniffers without having to add another encryption layer
 	## TO ADD: If ^^ are odd bits, this will be treated as a multicast MAC address and SHOULD be broadcasted as well, since many devices don't distinguish between broadcast and multicast.  Might be useful for extra evasion.
 	$success = $soy->SendPacket($soyeah);
 }
@@ -391,7 +410,7 @@ sub broadcast {
 	$datums = $chatrooms{$betype}[0][1]->get();
 	$chatrooms{$betype}[0][1]->delete(0.0,'end');
 	$datums = concise($rendecu,$datums,0);
-	tosspacket($betype,$iam . " [" . $myid . "] " . $datums);
+	tosspacket($betype,0,$iam . " [" . $myid . "] " . $datums);
 }
 
 sub print_keysym { ## masks entry fields, input is KeyPressed, Reference to Entry Widget, Reference to Value Scalar
