@@ -9,7 +9,7 @@
 
 ## DATA STRUCTURE:
 ## %chatrooms{$ethertype}[
-##				widgets (0) [tab(0),entry(1),label(2),scrolled(3: not present in New tab)]
+##				widgets (0) [tab(0),entry(1),label(2),scrolled(3)] OR [tab(0),entry(1),label(2),lnick(3),nick(4),ltrip(5),trip(6),lkey(7),key(8)] for New tab
 ##				messages (1) [messageindex][handle,tripcode,message]
 ##				userlist (2) {username => lasttimestamp}
 ##			   ]
@@ -20,36 +20,42 @@
 ##  3. Save messages as raw data so that you can dynamically swap between blowfish keys, attempting to decipher each message for the current room each time you change the key
 ##  4. For the lazy hacker:  autoswap blowfish keys for each chatroom by setting the key to ethertype.encryptkey (OR ethertype.ethertype for the security oblivious)
 ##  5. Autojoin rooms when you detect the appropriate newroom signal on an ethertype you don't currently have open: ^nr]
-##  6. Caveat:  these prefixs are cleartext and could be signatured eventually.  for covert applications, add another cipher of the full payload with a hardcoded key
-##  7. Turn a tab red when it has an update
+##  6. Caveat:  These prefixs are cleartext and could be signatured eventually.  For covert applications, add another cipher of the full payload with a hardcoded key
+##  7. PARTIAL: Turn a tab red when it has an update (stub already created in useThisNIC)
 ##  8. Bind Port to NoPro proxy
 ##  9. Reverse Port to NoPro proxy
 ## 10. IO to NoPro proxy
 ## 11. Prefix for pushing files over chat client
-## 12. Move all prefixes to non-ASCII to slow down junior forensics investigators
-## 13. Encipher all comms, except perhaps prefixes, as those are used to discern nopro prefixes from legitimate data
+## 12. DONE: Move all prefixes to non-ASCII to slow down junior forensics investigators
+## 13. DEPRECATED, COPY OF #6: Encipher all comms, except perhaps prefixes, as those are used to discern nopro prefixes from legitimate data
 ## 14. Add option to surpress keepalives, joins, and parts to keep them from getting too loud on the wire
 ## 15. Add button to leave a room (be sure to update shared array @trackrooms)
 ## 16. RARP detection for your source mac, then dynamic mac reallocation.  Similar detection of mac scanners.  Perhaps jump to legit OUIs at http://standards.ieee.org/regauth/oui/index.shtml
+## 17. PARTIAL, MORE OPTIONS PENDING: Move options to New Room tab
+## 18. DONE: Allow shorter blowfish keys and just pad with nulls
+## 19. DONE: Source MAC address changes randomly among legitimate looking OUIs
+## 20. Add option to toggle between setting MAC addresses statically, random for every packet, or changes after detection
 
 ## INSTALLING DEPENDANCIES:
 ## dead for perl 5.16 ## ppm install http://www.bribes.org/perl/ppm/Win32-NetPacket.ppd
 ## instead!
 ## 	get your 3.1 winpcap and 3.1 wpdpack from  http://www.winpcap.org/archive/  (3.1 is important because it has ntddndis.h)
 ##	grab win32-netpack gzip from http://www.bribes.org/perl/Win32-NetPacket-0.03.tar.gz  -> the readme inside is useful
-##	extract netpack and wpdpack.  make wpdpack to C:\wpdpack
+##	extract netpack and wpdpack.  move wpdpack to C:\wpdpack
 ##	ppm install dmake
 ##	in netpack, perl Makefile.PL
 ##	dmake, dmake test, dmake install
 ## ppm install http://www.bribes.org/perl/ppm/Net-Pcap.ppd
 ## ppm install http://theoryx5.uwinnipeg.ca/ppms/Crypt-Blowfish.ppd
 ## ppm install Tk
-## ppm install Tk-ROText
 
 ## BORKED
-## Still needs automatic toplevel resizing after NIC is selected
-## Still needs entry validation prior to tab creation
-## Perhaps track and transmit your own keepalives for each tab independantly
+## 1. DONE, WE'LL JUST DEFAULT A LITTLE LARGER: Still needs automatic toplevel resizing after NIC is selected
+## 2. DONE: Still needs entry validation prior to tab creation
+## 3. Perhaps track and transmit your own keepalives for each tab independantly
+## 4. DONE: Force new room to only accept four hex characters
+## 5. Please Sir, verify that the six random bits of data at the end of the payload are actually random and not in ascii form
+## 6. DONE: Pad encryption key to 8 then truncate to 56 so that it doesn't break blowfish
 
 #perl2exe_include "attributes.pm"
 #perl2exe_include "Tk/Photo.pm"
@@ -78,10 +84,12 @@ our $nic;
 our $dnic;
 our $iam;
 our $myid;
+our $ethertype = "0E0E";
 our @gg;
-our $ethertype;
 our %chatrooms = ();
 our $nb;
+our $rendecu = "allcalma";
+our $tcode;
 
 $|++;
 
@@ -92,8 +100,8 @@ my @adpts = Net::Pcap::findalldevs(\$err);
 $numadpt = @adpts;
 print "$numadpt adapters found... ";
 
-$initheight = 76 + (($numadpt + 1) * 16);
-$initwidth = 220;
+$initheight = 176 + (($numadpt + 1) * 16);
+$initwidth = 320;
 
 my $TOP = MainWindow->new();
 $SIG{INT} = sub{ quiting(); $TOP->focusForce; $TOP->destroy; };
@@ -124,34 +132,10 @@ for ($g = 0;$g < $numadpt;$g++) {
 	$thisone = sprintf "%d.%d.%d.%d\/%d.%d.%d.%d",(($nip & 0xFF000000)>>24),(($nip & 0x00FF0000)>>16),(($nip & 0x0000FF00)>>8),($nip & 0x000000FF),(($nmask & 0xFF000000)>>24),(($nmask & 0x00FF0000)>>16),(($nmask & 0x0000FF00)>>8),($nmask & 0x000000FF);
 	$gg[$g] = $hl->Button(-text => $thisone, -command => [ \&useThisNIC, $g ])->place(-relwidth => "1.0", -width => "-10", -"y" => (($g * 16) + 5), -height => "16", -x => "5");
 }
-$whatever = (($numadpt + 1) * 16) + 5;
-## Choose handle
-$nicktext = $hl->Label(-text => "Handle")->place(-height => "16", -width => "50", -"y" => $whatever, -x => "5");
-$nick = $hl->Entry()->place(-height => "16", -relwidth => "1.0", -width => "-65", -"y" => $whatever, -x => "60");
-$nick->focus;
-## Choose tripcode string
-$whatever += 16;
-$nidtext = $hl->Label(-text => "ID")->place(-height => "16", -width => "50", -"y" => $whatever, -x => "5");
-$myid = "";
-$nid = $hl->Entry()->place(-height => "16", -relwidth => "1.0", -width => "-65", -"y" => $whatever, -x => "60");
-$nid->bind('<Key>' => [\&print_keysym,Ev('N'),$nid,\$myid]);
-## Choose encryption key - add checks later to pad this to 8 then truncate down to 56
-$whatever += 16;
-$nkeytext = $hl->Label(-text => "Key")->place(-height => "16", -width => "50", -"y" => $whatever, -x => "5");
-$rendecu = "allcalma";
-$nkey = $hl->Entry()->place(-height => "16", -relwidth => "1.0", -width => "-65", -"y" => $whatever, -x => "60");
-$nkey->bind('<Key>' => [\&print_keysym,Ev('N'),$nkey,\$rendecu]);
-$nkey->insert('end',"*" x length($rendecu));
-## Variable ethertype - Must be 4 hex or roof flies off, add checks later
-$whatever += 16;
-$netypetext = $hl->Label(-text => "EType")->place(-height => "16", -width => "50", -"y" => $whatever, -x => "5");
-$ethertype = "0E0E";
-$netype = $hl->Entry()->place(-height => "16", -relwidth => "1.0", -width => "-65", -"y" => $whatever, -x => "60");
-$netype->insert('end',$ethertype);
 
 MainLoop;
 
-sub quiting {
+sub quiting { ## tell errbody you're leaving
 	foreach my $quittar (keys %chatrooms) {
 		unless ($quittar eq "New") {
 			tosspacket($quittar,3,$iam);
@@ -171,6 +155,12 @@ sub writequeue { ## Listen threads
 
 sub concise { ## cipher block chainer for enc/dec
 	my ($key,$input,$type) = @_;
+	if (length($key) < 8) {
+		$key = $key . (chr(0) x (8 - length($key)));
+	}
+	if (length($key) > 56) {
+		$key = substr($key,0,56);
+	}
 	my $pwcrypt = new Crypt::Blowfish_PP $key;
 	$input = decode_base64($input . ("=" x (12 - (length($input) % 12)))) if $type; 
 	my $vallen = length($input);
@@ -233,7 +223,7 @@ sub printPackets { ## Parses packets into human readable
     }
 }
 
-sub newroom {
+sub newroom { ## create a new tab and listen on a new ethertype
 	my ($rewm) = shift;
 	
 	$rewm = uc($rewm);
@@ -261,46 +251,45 @@ sub newroom {
 	tosspacket($rewm,1,$iam);
 }
 
-sub raisefocus{
+sub raisefocus{ ## puts keyboard focus on the entry widgets when you switch tabs
 	$tabname = shift;
 	if ($chatrooms{$tabname}[0][1]) { ## This keeps raisefocus from raising errors before the entry widgets are defined
 		$chatrooms{$tabname}[0][1]->focus;
 	}
-
 }
 
 sub useThisNIC { ## create main tk and main burn loop
-	$TOP->configure(-height => ($initheight + 50), -width => ($initwidth + 100));
-	$hl->configure(-height => ($initheight + 50), -width => ($initwidth + 100));
 	my ($useNIC) = @_;
-	$iam = $nick->get;
-	$ethertype = uc($netype->get);
-	$myid = $iam . $myid; ## salt tripcode with handle
-	$myid = concise($rendecu,$myid,0); ## encipher, to add a little more computational cost.
-	$myid = encode_base64($myid); ## then base64 to display nicely
-	chomp($myid); ## get rid of newline cruft
-	$myid =~ s/=//g; ## get rid of base64 cruft
-	$myid = substr $myid, -6; ## truncate to the last 6 chars so this doesnt get out of hand.  Being lossy, this also makes the cipher one-way
-	$TOP->title("NoPro - $iam [$myid] " . ("*" x length($rendecu)));
+	$dnic = $adpts[$useNIC];
+
 	foreach my $zong (@gg) {
 		$zong->placeForget;
 	}
-	$nicktext->placeForget;
-	$nick->placeForget;
-	$nidtext->placeForget;
-	$nid->placeForget;
-	$dnic = $adpts[$useNIC];
 	
 	$nb = $hl->NoteBook(-tabpadx => 0, -tabpady => 0)->place(-relheight => "1.0", -relwidth => "1.0");
 	
 	$chatrooms{"New"}[0][0] = $nb->add("New", -label => "New", -raisecmd => sub { raisefocus("New") });
-	$chatrooms{"New"}[0][2] = $chatrooms{"New"}[0][0]->Label(-text => "EType")->place(-height => "16", -width => "50", -"y" => "76", -x => "5");
-	$chatrooms{"New"}[0][1] = $chatrooms{"New"}[0][0]->Entry()->place(-height => "16", -relwidth => "1.0", -width => "-65", -"y" => "76", -x => "60"); ## enter key here should spawn a new room tab
-	$chatrooms{"New"}[0][1]->bind('<Return>' => sub{ newroom($chatrooms{"New"}[0][1]->get); });
-	$chatrooms{"New"}[0][1]->focus;
 	
-	newroom("0E0E");
-
+	## Choose handle
+	$chatrooms{"New"}[0][3] = $chatrooms{"New"}[0][0]->Label(-text => "Handle")->place(-height => "16", -width => "50", -"y" => "5", -x => "5");
+	$chatrooms{"New"}[0][4] = $chatrooms{"New"}[0][0]->Entry()->place(-height => "16", -relwidth => "1.0", -width => "-65", -"y" => "5", -x => "60");
+	$chatrooms{"New"}[0][4]->bind('<Key>' => [\&print_keysym,Ev('N'),$chatrooms{"New"}[0][4],\$iam]);
+	$chatrooms{"New"}[0][4]->focus;
+	## Choose tripcode string
+	$chatrooms{"New"}[0][5] = $chatrooms{"New"}[0][0]->Label(-text => "ID")->place(-height => "16", -width => "50", -"y" => "21", -x => "5");
+	$chatrooms{"New"}[0][6] = $chatrooms{"New"}[0][0]->Entry()->place(-height => "16", -relwidth => "1.0", -width => "-65", -"y" => "21", -x => "60");
+	$chatrooms{"New"}[0][6]->bind('<Key>' => [\&print_keysym,Ev('N'),$chatrooms{"New"}[0][6],\$tcode]);
+	## Choose encryption key
+	$chatrooms{"New"}[0][7] = $chatrooms{"New"}[0][0]->Label(-text => "Key")->place(-height => "16", -width => "50", -"y" => "37", -x => "5");
+	$chatrooms{"New"}[0][8] = $chatrooms{"New"}[0][0]->Entry()->place(-height => "16", -relwidth => "1.0", -width => "-65", -"y" => "37", -x => "60");
+	$chatrooms{"New"}[0][8]->bind('<Key>' => [\&print_keysym,Ev('N'),$chatrooms{"New"}[0][8],\$rendecu]);
+	$chatrooms{"New"}[0][8]->insert('end',"*" x length($rendecu));
+	
+	$chatrooms{"New"}[0][2] = $chatrooms{"New"}[0][0]->Label(-text => "EType")->place(-height => "16", -width => "50", -"y" => "53", -x => "5");
+	$chatrooms{"New"}[0][1] = $chatrooms{"New"}[0][0]->Entry()->place(-height => "16", -relwidth => "1.0", -width => "-65", -"y" => "53", -x => "60");
+	$chatrooms{"New"}[0][1]->bind('<Key>' => [\&newroomvalidation,Ev('N'),$chatrooms{"New"}[0][1],\$ethertype]);
+	$chatrooms{"New"}[0][1]->insert('end',$ethertype);
+		
 	$lastud = 0;
 	threads->new(\&writequeue, $useNIC);
 	
@@ -396,11 +385,34 @@ sub tosspacket {
 	
 	$padding = int(rand(64));
 	$bpadding = unpack('B8',$padding);
-	($moarfiller,$bp) = unpack('a2a6', $bpadding); ## generate six bits of random data for padding
+	($moarfiller,$bp) = unpack('a2a6', $bpadding); ## generate six bits of random data for padding # not sure if this is going random properly or if it's all ascii representations of numbers
 
 	my $soy = Win32::NetPacket->new(adapter_name => $dnic) or die $@;
-
-	$soyeah =  "\xFF\xFF\xFF\xFF\xFF\xFF" . "\x00\xAA\xBB\xCC\xDD\xEE" . pack("H*",$tptype) . pack('B*',$aptype . $pa . $bp); ## pack two bits of ptype, payload, and six random bits.  This keeps ascii from being displayed overtly on sniffers without having to add another encryption layer
+	
+	$sourcemac = "";
+	for ($octet = 0; $octet < 6; $octet++) {
+		$toctet = int(rand(256));
+		if ($octet == 0) {
+			$toctet = $toctet >> 2;
+			$toctet = $toctet << 2; ## this keeps the most significant bit (since we are network byte order, and therefore big-endian)
+			## of the first octet a multiple of four, to look like a legitmate manufactureer OUI.
+			## With any even source MAC address, the radius authenticator sends 802.1x EAP Request Identity to try to identify me.
+			## With odd source MACs it does not, but those PROBABLY do not get forwarded by the switch,
+			## since responding would cause the destination device to inadvertantly broadcast, 
+			## which is usually not a desirable trait.  You could set your MAC to a MAC you sniff off the wire
+			## to perhaps evade port security for some while, though it may corrupt ARP tables.  The radius authenticator
+			## seems content to ping me for EAP Identity requests on mod 4=2 source MAC addresses, which also supports
+			## the idea that broad/multicast source MAC addresses aren't being relayed to it.
+			## EAP Identity Request Timeout defaults to 1 second IOS 4.1 and older. and 30 seconds on IOS 4.2 and newer
+			## EAP Identify Request Max Retries default to 2, Recommened set to 12.  Removes supplicant entry from MSCB (Mobile Station Control Block)
+			## (which should keep me from sending any packets) and the WLC (Wireless LAN Controller) (does this apply only to wireless?)
+			## sends a de-auth frame to the client, forcing the EAP process to restart.
+			## I'm curious if certain MAC addresses I've used in the past are blocked in any way currently.
+		}
+		$sourcemac .= chr($toctet);
+	}
+	#$sourcemac = "\x00\xAA\xBB\xCC\xDD\xEE";  ## uncomment if you're into hardcoding
+	$soyeah =  "\xFF\xFF\xFF\xFF\xFF\xFF" . $sourcemac . pack("H*",$tptype) . pack('B*',$aptype . $pa . $bp); ## pack two bits of ptype, payload, and six random bits.  This keeps ascii from being displayed overtly on sniffers without having to add another encryption layer
 	## TO ADD: If ^^ are odd bits, this will be treated as a multicast MAC address and SHOULD be broadcasted as well, since many devices don't distinguish between broadcast and multicast.  Might be useful for extra evasion.
 	$success = $soy->SendPacket($soyeah);
 }
@@ -419,16 +431,41 @@ sub print_keysym { ## masks entry fields, input is KeyPressed, Reference to Entr
 		$$reftohidden .= chr($keysym_decimal);
 		$sacredobj->delete('0.0','end');
 		$sacredobj->insert('end',"*" x length($$reftohidden));
-		$sacredobj->break();
 	}
 	elsif ($keysym_decimal == 65288 || $keysym_decimal == 65535) {
 		$$reftohidden = "";
 		$sacredobj->delete('0.0','end');
-		$sacredobj->break();
 	}
-	else {
-		return;
+	$myid = $iam . $tcode; ## salt tripcode with handle
+	$myid = concise($rendecu,$myid,0); ## encipher, to add a little more computational cost.
+	$myid = encode_base64($myid); ## then base64 to display nicely
+	chomp($myid); ## get rid of newline cruft
+	$myid =~ s/=//g; ## get rid of base64 cruft
+	$myid = substr $myid, -6; ## truncate to the last 6 chars so this doesnt get out of hand.  Being lossy, this also makes the cipher one-way
+	$TOP->title("NoPro - $iam [$myid] " . ("*" x length($rendecu)));
+
+	$sacredobj->break();
+}
+
+sub newroomvalidation { ## makes sure we only enter four hex into our new room names
+	my($keysym_decimal,$sacredobj,$reftohidden) = ($_[1],$_[2],$_[3]);
+	if (	($keysym_decimal >= 48 && $keysym_decimal <= 57) || ## numbers
+		($keysym_decimal >= 65 && $keysym_decimal <= 70) || ## upper A-F
+		($keysym_decimal >= 97 && $keysym_decimal <= 102)) { ## lower A-F
+		if (length($$reftohidden) < 4) {
+			$$reftohidden .= uc(chr($keysym_decimal));
+		}
 	}
+	elsif ($keysym_decimal == 65288 || $keysym_decimal == 65535) { ## backspace and delete
+		$$reftohidden = "";
+	}
+	elsif ($keysym_decimal == 65293) { ## enter and numpad enter
+		newroom($$reftohidden);
+		$$reftohidden = "";
+	}
+	$sacredobj->delete('0.0','end');
+	$sacredobj->insert('end',$$reftohidden);
+	$sacredobj->break();
 }
 
 sub parsehdra { ## bin2dec 32 bit max subroutine
