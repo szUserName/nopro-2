@@ -9,12 +9,12 @@
 
 ## DATA STRUCTURE:
 ## %chatrooms{$ethertype}[
-##				widgets (0) [tab(0),entry(1),label(2),scrolled(3)] OR [tab(0),entry(1),label(2),lnick(3),nick(4),ltrip(5),trip(6),lkey(7),key(8)] for New tab
+##				widgets (0) [tab(0),entry(1),label(2),scrolled(3),close(4)] OR [tab(0),etype(1),letype(2),lnick(3),nick(4),ltrip(5),trip(6),lkey(7),key(8)] for New tab
 ##				messages (1) [messageindex][handle,tripcode,message]
 ##				userlist (2) {username => lasttimestamp}
 ##			   ]
 
-##  FEATURES TO ADD:
+## FEATURES TO ADD:
 ##  1. shift/push messageindex in each anonymous array to control max buffer size, or push then negative range operator slice to max buffer size [-50..-1].  this keeps index 0 as the oldest message for easier for loop widget populating
 ##  2. Caveat:  You'll be spammed with rubbish if you pick an ethertype in use on your network.  Perhaps create a prefix for message data so that you can use common ethertypes: ^md]
 ##  3. Save messages as raw data so that you can dynamically swap between blowfish keys, attempting to decipher each message for the current room each time you change the key
@@ -29,12 +29,14 @@
 ## 12. DONE: Move all prefixes to non-ASCII to slow down junior forensics investigators
 ## 13. DEPRECATED, COPY OF #6: Encipher all comms, except perhaps prefixes, as those are used to discern nopro prefixes from legitimate data
 ## 14. Add option to surpress keepalives, joins, and parts to keep them from getting too loud on the wire
-## 15. Add button to leave a room (be sure to update shared array @trackrooms)
+## 15. DONE: Add button to leave a room (be sure to update shared array @trackrooms)
 ## 16. RARP detection for your source mac, then dynamic mac reallocation.  Similar detection of mac scanners.  Perhaps jump to legit OUIs at http://standards.ieee.org/regauth/oui/index.shtml
 ## 17. PARTIAL, MORE OPTIONS PENDING: Move options to New Room tab
 ## 18. DONE: Allow shorter blowfish keys and just pad with nulls
 ## 19. DONE: Source MAC address changes randomly among legitimate looking OUIs
 ## 20. Add option to toggle between setting MAC addresses statically, random for every packet, or changes after detection
+## 21. Timestamp option for messages
+## 22. DONE: Perhaps print a notice when you join ethertypes of common protocols
 
 ## INSTALLING DEPENDANCIES:
 ## dead for perl 5.16 ## ppm install http://www.bribes.org/perl/ppm/Win32-NetPacket.ppd
@@ -54,9 +56,13 @@
 ## 2. DONE: Still needs entry validation prior to tab creation
 ## 3. Perhaps track and transmit your own keepalives for each tab independantly
 ## 4. DONE: Force new room to only accept four hex characters
-## 5. DONE? TESTING: Please Sir, verify that the six random bits of data at the end of the payload are actually random and not in ascii form
+## 5. DONE: Verify that the three random bits of data at the end of the payload are actually random and not in ascii form
 ## 6. DONE: Pad encryption key to 8 then truncate to 56 so that it doesn't break blowfish
-## 7. DONE? TESTING: I think the switch was adding padding and/or crc to messages.  Added a length field so that we can ignore all the extra cruft
+## 7. DONE: I think the switch was adding padding and/or crc to messages.  Added a length field so that we can ignore all the extra cruft
+## 8. Normalize handle justification in nicklist
+## 9. DONE: Fix tab and shift tab bindings in New tab
+## 10. Make it more obvious that enter is bound to create tab in New tab etype widget
+## 11. Choosing an interface using tabtabtabenter doesing work like clicking it does, the new widgets exist and accept input, but the frame doesnt refresh
 
 #perl2exe_include "attributes.pm"
 #perl2exe_include "Tk/Photo.pm"
@@ -90,7 +96,7 @@ our @gg;
 our %chatrooms = ();
 our $nb;
 our $rendecu = "allcalma";
-our $tcode;
+our $tcode = "";
 
 $|++;
 
@@ -211,11 +217,11 @@ sub printPackets { ## Parses packets into human readable
     if (exists $roomtrack{$etherall}) {
 	$offset += 2; ## skip over ethertype
 	$xdrstr = unpack('B*', substr($data, $offset, (length($data) - $offset)));  ## dump the whole fucker to binary
-	($mtype,$msize,$remainder) = unpack('a2a11a*', $xdrstr); ## grab up two bits for message type
+	($mtype,$msize,$remainder) = unpack('a2a11a*', $xdrstr); ## grab up two bits for message type and eleven for payload size
 	$mtype = parsehdra($mtype);
 	$msize = parsehdra($msize);
-	#$remainder = substr($remainder, 0, (length($remainder) - 6)); ## remove 6 bit padding
-	$remainder = substr($remainder, 0, ($msize * 8)); ## remove 6 bit padding
+	return if $msize < 1; ## Uh, perhaps this is someone else
+	$remainder = substr($remainder, 0, ($msize * 8)); ## effectively removes the 3 bit padding by ignoring it
 	$repackxdrstr = pack('B*',$remainder);
 	@peasy = ("","^jn]","^kl]","^qt]"); ## conversion table for legacy message type handling
 	{
@@ -241,6 +247,11 @@ sub newroom { ## create a new tab and listen on a new ethertype
 	$chatrooms{$rewm}[0][3]->tagConfigure("q", -foreground => "#AF1010"); ## quit colour
 	$chatrooms{$rewm}[0][3]->tagConfigure("j", -foreground => "#1010AF"); ## join colour
 
+	if (chkethertype($rewm) ne "Unassigned") {
+		$chatrooms{$rewm}[0][3]->insert('end',chkethertype($rewm),"q");
+		$chatrooms{$rewm}[0][3]->yview('moveto','1.0');
+	}
+	$chatrooms{$rewm}[0][4] = $chatrooms{$rewm}[0][0]->Button(-command => sub { leaveroom($rewm) })->place(-height => "16", -width => "7", -"y" => "0", -relx => "1.0", -x => "-7");
 	$chatrooms{$rewm}[0][2] = $chatrooms{$rewm}[0][0]->Label(-anchor => 'nw')->place(-relheight => "1.0", -height => "-26", -width => "91", -"y" => "5", -relx => "1.0", -x => "-98");
 	
 	$chatrooms{$rewm}[0][1] = $chatrooms{$rewm}[0][0]->Entry()->place(-height => "16", -relwidth => "1.0", -width => "-102", -rely => "1.0", -"y" => "-21", -x => "5");
@@ -252,6 +263,18 @@ sub newroom { ## create a new tab and listen on a new ethertype
 		cond_signal(@trackrooms);
 	}
 	tosspacket($rewm,1,$iam);
+}
+
+sub leaveroom { ## close a tab and stop listening for events on its ethertype
+	$ltabname = shift;
+	tosspacket($rewm,4,$iam);
+	{ ## this essentially enables sniffing for this ethertype
+		lock @trackrooms;
+		push @trackrooms, $rewm; ## Omit the + sign for leaving a room
+		cond_signal(@trackrooms);
+	}
+	delete $chatrooms{$ltabname};
+	$nb->delete($ltabname);
 }
 
 sub raisefocus{ ## puts keyboard focus on the entry widgets when you switch tabs
@@ -292,8 +315,9 @@ sub useThisNIC { ## create main tk and main burn loop
 	$chatrooms{"New"}[0][1] = $chatrooms{"New"}[0][0]->Entry()->place(-height => "16", -relwidth => "1.0", -width => "-65", -"y" => "53", -x => "60");
 	$chatrooms{"New"}[0][1]->bind('<Key>' => [\&newroomvalidation,Ev('N'),$chatrooms{"New"}[0][1],\$ethertype]);
 	$chatrooms{"New"}[0][1]->insert('end',$ethertype);
-		
+	
 	$lastud = 0;
+
 	threads->new(\&writequeue, $useNIC);
 	
 	while (1) { ##  main burn loop, checks for new messages, handles updates to ulist and does keepalive pings
@@ -381,7 +405,7 @@ sub tosspacket {
 	my ($tptype,$ptype,$payload) = @_;
 	## manual binary generation, to keep automatic zero padding from occuring	
 	$bptype = unpack('B8',$ptype);
-	($filler,$aptype) = unpack('a6a2', $bptype); ## grab just two bits of data for packet type, i'm not sure this is working either. apparently i'm bad at decimal to binary
+	(undef,$aptype) = unpack('a6a2', $bptype); ## grab just two bits of data for packet type, i'm not sure this is working either. apparently i'm bad at decimal to binary
 	
 	$pp = unpack('B*',$payload);
 	$pa = unpack('a*', $pp); ## convert ascii payload to bits
@@ -389,7 +413,7 @@ sub tosspacket {
 	$padding = int(rand(64));
 	$padding = pack("n*",$padding); ## a short, so 16 bits
 	$bpadding = unpack('B*',$padding);
-	($moarfiller,$bp) = unpack('a13a3', $bpadding); ## generate three bits of random data for padding # not sure if this is going random properly or if it's all ascii representations of numbers
+	(undef,$bp) = unpack('a13a3', $bpadding); ## generate three bits of random data for padding # not sure if this is going random properly or if it's all ascii representations of numbers
 
 	$plen = length($payload); ## I think the switch is adding padding or crc data to frames.  We will send frame length with each packet so we can discard the data appended.  11 bit field. Max 1500 or so, so the leftmost 5 bits will be zeros and discarded.
 	$plen = pack("n*",$plen);
@@ -424,7 +448,7 @@ sub tosspacket {
 	#$sourcemac = "\x00\xAA\xBB\xCC\xDD\xEE";  ## uncomment if you're into hardcoding
 	$soyeah =  "\xFF\xFF\xFF\xFF\xFF\xFF" . $sourcemac . pack("H*",$tptype) . pack('B*',$aptype . $aplen . $pa . $bp); ## pack two bits of ptype, eleven bits of size, payload in mults of 8, and three random bits.  This keeps ascii from being displayed overtly on sniffers without having to add another encryption layer
 	## TO ADD: If ^^ are odd bits, this will be treated as a multicast MAC address and SHOULD be broadcasted as well, since many devices don't distinguish between broadcast and multicast.  Might be useful for extra evasion.
-	$success = $soy->SendPacket($soyeah);
+	$soy->SendPacket($soyeah);
 }
 
 sub broadcast {
@@ -442,9 +466,12 @@ sub print_keysym { ## masks entry fields, input is KeyPressed, Reference to Entr
 		$sacredobj->delete('0.0','end');
 		$sacredobj->insert('end',"*" x length($$reftohidden));
 	}
-	elsif ($keysym_decimal == 65288 || $keysym_decimal == 65535) {
+	elsif ($keysym_decimal == 65288 || $keysym_decimal == 65535) { ## backspace and delete
 		$$reftohidden = "";
 		$sacredobj->delete('0.0','end');
+	}
+	elsif ($keysym_decimal == 65289 || $keysym_decimal == 65505) { ## return to use default tab and shift bindings
+		return;
 	}
 	$myid = $iam . $tcode; ## salt tripcode with handle
 	$myid = concise($rendecu,$myid,0); ## encipher, to add a little more computational cost.
@@ -480,4 +507,58 @@ sub newroomvalidation { ## makes sure we only enter four hex into our new room n
 
 sub parsehdra { ## bin2dec 32 bit max subroutine
 	return unpack("N", pack("B32", substr("0" x 32 . shift, -32)));
+}
+
+sub chkethertype { ## Returns ethertypes from numbers
+	my ($ethercomp) = shift;
+	%suparEther = (
+		'0800', 'Internet Protocol version 4 (IPv4)',
+		'0802', 'Cisco Discovery Protocol, VLAN Trunking Protocol, or Spanning Tree Protocol',
+		'0806', 'Address Resolution Protocol (ARP)',
+		'0808', 'RFC1701 (GRE)',
+		'0842', 'Wake-on-LAN',
+		'22F3', 'IETF TRILL Protocol',
+		'6003', 'DECnet Phase IV',
+		'8035', 'Reverse Address Resolution Protocol',
+		'809B', 'AppleTalk (Ethertalk)',
+		'80F3', 'AppleTalk Address Resolution Protocol (AARP)',
+		'8100', 'VLAN-tagged frame (IEEE 802.1Q) & Shortest Path Bridging IEEE 802.1aq',
+		'8137', 'IPX',
+		'8138', 'IPX',
+		'8204', 'QNX Qnet',
+		'86DD', 'Internet Protocol Version 6 (IPv6)',
+		'8808', 'Ethernet Flow Control',
+		'8809', 'Ethernet OAM Protocol IEEE 802.3ah (Slow Protocols)',
+		'8819', 'CobraNet',
+		'8847', 'MPLS unicast',
+		'8848', 'MPLS multicast',
+		'8863', 'PPPoE Discovery Stage',
+		'8864', 'PPPoE Session Stage',
+		'8870', 'Jumbo Frames',
+		'887B', 'HomePlug 1.0 MME',
+		'888E', 'EAP over LAN (IEEE 802.1X)',
+		'8892', 'PROFINET Protocol',
+		'889A', 'HyperSCSI (SCSI over Ethernet)',
+		'88A2', 'ATA over Ethernet',
+		'88A4', 'EtherCAT Protocol',
+		'88A8', 'Provider Bridging (IEEE 802.1ad) & Shortest Path Bridging IEEE 802.1aq',
+		'88AB', 'Ethernet Powerlink[citation needed]',
+		'88CC', 'Link Layer Discovery Protocol (LLDP)',
+		'88CD', 'SERCOS III',
+		'88E1', 'HomePlug AV MME',
+		'88E3', 'Media Redundancy Protocol (IEC62439-2)',
+		'88E5', 'MAC security (IEEE 802.1AE)',
+		'88F7', 'Precision Time Protocol (IEEE 1588)',
+		'8902', 'IEEE 802.1ag Connectivity Fault Management (CFM) Protocol / ITU-T Recommendation Y.1731 (OAM)',
+		'8906', 'Fibre Channel over Ethernet (FCoE)',
+		'8914', 'FCoE Initialization Protocol',
+		'8915', 'RDMA over Converged Ethernet (RoCE)',
+		'9000', 'Ethernet Configuration Testing Protocol',
+		'9100', 'Q-in-Q',
+		'CAFE', 'Veritas Low Latency Transport (LLT) for Veritas Cluster Server'
+	);
+	if (exists $suparEther{$ethercomp}) {
+		return $suparEther{$ethercomp};
+	}
+	else { return "Unassigned"; }
 }
