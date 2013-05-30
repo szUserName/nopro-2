@@ -54,8 +54,9 @@
 ## 2. DONE: Still needs entry validation prior to tab creation
 ## 3. Perhaps track and transmit your own keepalives for each tab independantly
 ## 4. DONE: Force new room to only accept four hex characters
-## 5. Please Sir, verify that the six random bits of data at the end of the payload are actually random and not in ascii form
+## 5. DONE? TESTING: Please Sir, verify that the six random bits of data at the end of the payload are actually random and not in ascii form
 ## 6. DONE: Pad encryption key to 8 then truncate to 56 so that it doesn't break blowfish
+## 7. DONE? TESTING: I think the switch was adding padding and/or crc to messages.  Added a length field so that we can ignore all the extra cruft
 
 #perl2exe_include "attributes.pm"
 #perl2exe_include "Tk/Photo.pm"
@@ -210,9 +211,11 @@ sub printPackets { ## Parses packets into human readable
     if (exists $roomtrack{$etherall}) {
 	$offset += 2; ## skip over ethertype
 	$xdrstr = unpack('B*', substr($data, $offset, (length($data) - $offset)));  ## dump the whole fucker to binary
-	($mtype,$remainder) = unpack('a2a*', $xdrstr); ## grab up two bits for message type
+	($mtype,$msize,$remainder) = unpack('a2a11a*', $xdrstr); ## grab up two bits for message type
 	$mtype = parsehdra($mtype);
-	$remainder = substr($remainder, 0, (length($remainder) - 6)); ## remove 6 bit padding
+	$msize = parsehdra($msize);
+	#$remainder = substr($remainder, 0, (length($remainder) - 6)); ## remove 6 bit padding
+	$remainder = substr($remainder, 0, ($msize * 8)); ## remove 6 bit padding
 	$repackxdrstr = pack('B*',$remainder);
 	@peasy = ("","^jn]","^kl]","^qt]"); ## conversion table for legacy message type handling
 	{
@@ -378,14 +381,20 @@ sub tosspacket {
 	my ($tptype,$ptype,$payload) = @_;
 	## manual binary generation, to keep automatic zero padding from occuring	
 	$bptype = unpack('B8',$ptype);
-	($filler,$aptype) = unpack('a6a2', $bptype); ## grab just two bits of data for packet type
+	($filler,$aptype) = unpack('a6a2', $bptype); ## grab just two bits of data for packet type, i'm not sure this is working either. apparently i'm bad at decimal to binary
 	
 	$pp = unpack('B*',$payload);
 	$pa = unpack('a*', $pp); ## convert ascii payload to bits
 	
 	$padding = int(rand(64));
-	$bpadding = unpack('B8',$padding);
-	($moarfiller,$bp) = unpack('a2a6', $bpadding); ## generate six bits of random data for padding # not sure if this is going random properly or if it's all ascii representations of numbers
+	$padding = pack("n*",$padding); ## a short, so 16 bits
+	$bpadding = unpack('B*',$padding);
+	($moarfiller,$bp) = unpack('a13a3', $bpadding); ## generate three bits of random data for padding # not sure if this is going random properly or if it's all ascii representations of numbers
+
+	$plen = length($payload); ## I think the switch is adding padding or crc data to frames.  We will send frame length with each packet so we can discard the data appended.  11 bit field. Max 1500 or so, so the leftmost 5 bits will be zeros and discarded.
+	$plen = pack("n*",$plen);
+	$bplen = unpack('B*',$plen);
+	$aplen = sprintf("%011d",unpack('a*', $bplen));
 
 	my $soy = Win32::NetPacket->new(adapter_name => $dnic) or die $@;
 	
@@ -394,7 +403,8 @@ sub tosspacket {
 		$toctet = int(rand(256));
 		if ($octet == 0) {
 			$toctet = $toctet >> 2;
-			$toctet = $toctet << 2; ## this keeps the most significant bit (since we are network byte order, and therefore big-endian)
+			$toctet = $toctet << 2;
+			## this keeps the most significant bit (since we are network byte order, and therefore big-endian)
 			## of the first octet a multiple of four, to look like a legitmate manufactureer OUI.
 			## With any even source MAC address, the radius authenticator sends 802.1x EAP Request Identity to try to identify me.
 			## With odd source MACs it does not, but those PROBABLY do not get forwarded by the switch,
@@ -412,7 +422,7 @@ sub tosspacket {
 		$sourcemac .= chr($toctet);
 	}
 	#$sourcemac = "\x00\xAA\xBB\xCC\xDD\xEE";  ## uncomment if you're into hardcoding
-	$soyeah =  "\xFF\xFF\xFF\xFF\xFF\xFF" . $sourcemac . pack("H*",$tptype) . pack('B*',$aptype . $pa . $bp); ## pack two bits of ptype, payload, and six random bits.  This keeps ascii from being displayed overtly on sniffers without having to add another encryption layer
+	$soyeah =  "\xFF\xFF\xFF\xFF\xFF\xFF" . $sourcemac . pack("H*",$tptype) . pack('B*',$aptype . $aplen . $pa . $bp); ## pack two bits of ptype, eleven bits of size, payload in mults of 8, and three random bits.  This keeps ascii from being displayed overtly on sniffers without having to add another encryption layer
 	## TO ADD: If ^^ are odd bits, this will be treated as a multicast MAC address and SHOULD be broadcasted as well, since many devices don't distinguish between broadcast and multicast.  Might be useful for extra evasion.
 	$success = $soy->SendPacket($soyeah);
 }
