@@ -9,7 +9,7 @@
 
 ## DATA STRUCTURE:
 ## %chatrooms{$ethertype}[
-##				widgets (0) [tab(0),entry(1),label(2),scrolled(3),close(4)] OR [tab(0),etype(1),letype(2),lnick(3),nick(4),ltrip(5),trip(6),lkey(7),key(8)] for New tab
+##				widgets (0) [tab(0),entry(1),label(2),scrolled(3),close(4),resize(5)] OR [tab(0),etype(1),letype(2),lnick(3),nick(4),ltrip(5),trip(6),lkey(7),key(8),exit(9),resize(10)] for New tab
 ##				messages (1) [messageindex][handle,tripcode,message]
 ##				userlist (2) {username => lasttimestamp}
 ##			   ]
@@ -37,6 +37,7 @@
 ## 20. Add option to toggle between setting MAC addresses statically, random for every packet, or changes after detection
 ## 21. Timestamp option for messages
 ## 22. DONE: Perhaps print a notice when you join ethertypes of common protocols
+## 23. DONE: Flashes in taskbar when you get a new message if not active window
 
 ## INSTALLING DEPENDANCIES:
 ## dead for perl 5.16 ## ppm install http://www.bribes.org/perl/ppm/Win32-NetPacket.ppd
@@ -74,6 +75,10 @@
 #perl2exe_info ProductName=Microsoft® Windows® Operating System
 #perl2exe_info ProductVersion=6.0.6000.16386
 
+##$toplevel->overrideredirect(1);  # Remove all decorations
+#Calling overrideredirect with no argument returns the current value (1 or 0):
+#$current_value = $toplevel->overrideredirect();
+
 use threads;
 use threads::shared;
 use Net::Pcap;
@@ -107,17 +112,24 @@ my @adpts = Net::Pcap::findalldevs(\$err);
 $numadpt = @adpts;
 print "$numadpt adapters found... ";
 
-$initheight = 176 + (($numadpt + 1) * 16);
-$initwidth = 320;
-
+my $winH = 176 + (($numadpt + 1) * 16);
+my $winW = 320;
+my $winX = 20;
+my $winY = 20;
 my $TOP = MainWindow->new();
 $SIG{INT} = sub{ quiting(); $TOP->focusForce; $TOP->destroy; };
 $TOP->title("NoPro");
-$TOP->minsize($initwidth, $initheight);
-$TOP->geometry($initwidth . "x" . $initheight . "+20+20");
+$TOP->minsize($winW, $winH);
+$TOP->geometry($winW . "x" . $winH . "+" . $winX . "+" . $winX);
 $TOP->packPropagate(1);
+$TOP->overrideredirect(1);
 #$TOP->Icon(-image => $TOP->Photo(-file=>"rigor.bmp"));
-my $hl = $TOP->Frame(-height => $initheight, -width => $initwidth)->pack;
+my $hl = $TOP->Frame(-height => $winH, -width => $winW)->pack;
+
+my $dragFromX = 0;
+my $dragFromY = 0;
+my $isDragging = 0;
+setdragbindings($hl,0);
 
 $TOP->bind('<Configure>' => sub {
 	$xe = $TOP->XEvent;
@@ -126,12 +138,6 @@ $TOP->bind('<Configure>' => sub {
 	}
 });
 
-
-$menu = $TOP->Menu(-type => "menubar");
-$TOP->configure(-menu => $menu);
-
-my $f = $menu->cascade(-label => "~File", -tearoff => "0");
-$f->command(-label => "E~xit", -command => sub{quiting(); $TOP->destroy;});
 ## Choose adapter - This choice advances to the next screen
 for ($g = 0;$g < $numadpt;$g++) {
 	$dnic = $adpts[$g];
@@ -139,8 +145,53 @@ for ($g = 0;$g < $numadpt;$g++) {
 	$thisone = sprintf "%d.%d.%d.%d\/%d.%d.%d.%d",(($nip & 0xFF000000)>>24),(($nip & 0x00FF0000)>>16),(($nip & 0x0000FF00)>>8),($nip & 0x000000FF),(($nmask & 0xFF000000)>>24),(($nmask & 0x00FF0000)>>16),(($nmask & 0x0000FF00)>>8),($nmask & 0x000000FF);
 	$gg[$g] = $hl->Button(-text => $thisone, -command => [ \&useThisNIC, $g ])->place(-relwidth => "1.0", -width => "-10", -"y" => (($g * 16) + 5), -height => "16", -x => "5");
 }
+$gg[$g] = $hl->Button(-text => "Exit", -command => sub{quiting(); $TOP->destroy;})->place(-relwidth => "1.0", -width => "-10", -"y" => (($g * 16) + 5), -height => "16", -x => "5");
 
 MainLoop;
+
+sub setdragbindings {
+	($dobject,$dtype) = @_;
+	if ($dtype) {
+		$dobject->bind('<ButtonPress-1>', sub {
+			$isDragging++;
+			$dragFromX = $winW - (($Tk::event->X) - $winX); ## find click offset compared to dimensions of window
+			$dragFromY = $winH - (($Tk::event->Y) - $winY);
+		});
+		$dobject->bind ('<ButtonRelease-1>', sub {
+			$isDragging = 0;
+		});
+		$dobject->bind ('<Motion>', sub {
+			return unless $isDragging;
+			my $curX = ($Tk::event->X);
+			my $curY = ($Tk::event->Y);
+			$curX -= ($winX - $dragFromX); ## find new window dimension, minus window position offset, minus resize button offset
+			$curY -= ($winY - $dragFromY);
+			$winW = $curX;
+			$winH = $curY;
+			$TOP->geometry($winW.'x'.$winH); ## alot smoother than MoveResizeWindow because you avoid to withdraw/deiconify flicker
+		});
+	}
+	else {
+		$dobject->bind('<ButtonPress-1>', sub {
+			$isDragging++;
+			$dragFromX = ($Tk::event->X) - $winX; ## find click offset compared to position of window
+			$dragFromY = ($Tk::event->Y) - $winY;
+		});
+		$dobject->bind ('<ButtonRelease-1>', sub {
+			$isDragging = 0;
+		});
+		$dobject->bind ('<Motion>', sub {
+			return unless $isDragging;
+			my $curX = ($Tk::event->X);
+			my $curY = ($Tk::event->Y);
+			$curX -= $dragFromX; ## find new window position compared to where it was when you first clicked to drag
+			$curY -= $dragFromY;
+			$winX = $curX;
+			$winY = $curY;
+			$TOP->MoveToplevelWindow($winX,$winY);
+		});
+	}
+}
 
 sub quiting { ## tell errbody you're leaving
 	foreach my $quittar (keys %chatrooms) {
@@ -195,7 +246,7 @@ sub concise { ## cipher block chainer for enc/dec
 }
 
 sub printPackets { ## Parses packets into human readable
-    my ($zed,$zedhash,$data) = @_; ## zed passed as null from &sniff
+    my (undef,undef,$data) = @_;
     my $offset = 0;
     my($macaddydest,$macaddysrc) = unpack 'H12H12', substr $data, $offset;
     $offset += 12; ## Jump past MAC addys
@@ -238,7 +289,7 @@ sub newroom { ## create a new tab and listen on a new ethertype
 	$rewm = uc($rewm);
 	$chatrooms{$rewm}[0][0] = $nb->add($rewm, -label => $rewm, -raisecmd => sub { raisefocus($rewm) });
 	$nb->raise($rewm);
-	
+	## Text field
 	$chatrooms{$rewm}[0][3] = $chatrooms{$rewm}[0][0]->Scrolled(Text, -relief => "sunken", -borderwidth => "1", -setgrid => "false", -height => "32", -scrollbars => "oe", -wrap => "word", -takefocus => "0")->place(-relheight => "1.0", -height => "-28", -relwidth => "1.0", -width => "-102", -"y" => "5", -x => "5");
 	$chatrooms{$rewm}[0][3]->mark(qw/set insert end/);
 	$chatrooms{$rewm}[0][3]->tagConfigure("c1", -foreground => "#10AF10"); ## handle colour
@@ -246,14 +297,19 @@ sub newroom { ## create a new tab and listen on a new ethertype
 	$chatrooms{$rewm}[0][3]->tagConfigure("c3", -foreground => "#000000"); ## text colour
 	$chatrooms{$rewm}[0][3]->tagConfigure("q", -foreground => "#AF1010"); ## quit colour
 	$chatrooms{$rewm}[0][3]->tagConfigure("j", -foreground => "#1010AF"); ## join colour
-
+	## Check if the room is a known protocol
 	if (chkethertype($rewm) ne "Unassigned") {
 		$chatrooms{$rewm}[0][3]->insert('end',chkethertype($rewm),"q");
 		$chatrooms{$rewm}[0][3]->yview('moveto','1.0');
 	}
-	$chatrooms{$rewm}[0][4] = $chatrooms{$rewm}[0][0]->Button(-command => sub { leaveroom($rewm) })->place(-height => "16", -width => "7", -"y" => "0", -relx => "1.0", -x => "-7");
+	## Exit button
+	$chatrooms{$rewm}[0][4] = $chatrooms{$rewm}[0][0]->Button(-command => sub { leaveroom($rewm) })->place(-height => "16", -width => "7", -"y" => "0", -relx => "1.0", -x => "-6");
+	## Resize button
+	$chatrooms{$rewm}[0][5] = $chatrooms{$rewm}[0][0]->Button(-text => "")->place(-height => "16", -width => "7", -rely => "1.0", -"y" => "-15", -relx => "1.0", -x => "-6");
+	setdragbindings($chatrooms{$rewm}[0][5],1);
+	## Namelist
 	$chatrooms{$rewm}[0][2] = $chatrooms{$rewm}[0][0]->Label(-anchor => 'nw')->place(-relheight => "1.0", -height => "-26", -width => "91", -"y" => "5", -relx => "1.0", -x => "-98");
-	
+	## Input widget
 	$chatrooms{$rewm}[0][1] = $chatrooms{$rewm}[0][0]->Entry()->place(-height => "16", -relwidth => "1.0", -width => "-102", -rely => "1.0", -"y" => "-21", -x => "5");
 	$chatrooms{$rewm}[0][1]->bind('<Return>' ,sub{broadcast($rewm); Tk->break; });
 	$chatrooms{$rewm}[0][1]->focus;
@@ -293,6 +349,7 @@ sub useThisNIC { ## create main tk and main burn loop
 	}
 	
 	$nb = $hl->NoteBook(-tabpadx => 0, -tabpady => 0)->place(-relheight => "1.0", -relwidth => "1.0");
+	setdragbindings($nb,0);
 	
 	$chatrooms{"New"}[0][0] = $nb->add("New", -label => "New", -raisecmd => sub { raisefocus("New") });
 	
@@ -310,11 +367,16 @@ sub useThisNIC { ## create main tk and main burn loop
 	$chatrooms{"New"}[0][8] = $chatrooms{"New"}[0][0]->Entry()->place(-height => "16", -relwidth => "1.0", -width => "-65", -"y" => "37", -x => "60");
 	$chatrooms{"New"}[0][8]->bind('<Key>' => [\&print_keysym,Ev('N'),$chatrooms{"New"}[0][8],\$rendecu]);
 	$chatrooms{"New"}[0][8]->insert('end',"*" x length($rendecu));
-	
+	## Join a channel
 	$chatrooms{"New"}[0][2] = $chatrooms{"New"}[0][0]->Label(-text => "EType")->place(-height => "16", -width => "50", -"y" => "53", -x => "5");
 	$chatrooms{"New"}[0][1] = $chatrooms{"New"}[0][0]->Entry()->place(-height => "16", -relwidth => "1.0", -width => "-65", -"y" => "53", -x => "60");
 	$chatrooms{"New"}[0][1]->bind('<Key>' => [\&newroomvalidation,Ev('N'),$chatrooms{"New"}[0][1],\$ethertype]);
 	$chatrooms{"New"}[0][1]->insert('end',$ethertype);
+	## Exit button
+	$chatrooms{"New"}[0][9] = $chatrooms{"New"}[0][0]->Button(-text => "Exit", -command => sub{quiting(); $TOP->destroy;})->place(-height => "16", -width => "50", -"y" => "69", -x => "5");
+	## Resize button
+	$chatrooms{"New"}[0][10] = $chatrooms{"New"}[0][0]->Button(-text => "")->place(-height => "16", -width => "7", -rely => "1.0", -"y" => "-15", -relx => "1.0", -x => "-6");
+	setdragbindings($chatrooms{"New"}[0][10],1);
 	
 	$lastud = 0;
 
@@ -377,6 +439,7 @@ sub useThisNIC { ## create main tk and main burn loop
 					$chatrooms{$ltitype}[0][3]->insert('end',$2 . " ","c2");
 					$chatrooms{$ltitype}[0][3]->insert('end',$',"c3");
 					$chatrooms{$ltitype}[0][3]->yview('moveto','1.0');
+					$TOP->focus(-force);
 				}
 			}
 		}
