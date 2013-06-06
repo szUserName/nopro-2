@@ -25,19 +25,18 @@
 ##  8. Bind Port to NoPro proxy
 ##  9. Reverse Port to NoPro proxy
 ## 10. IO to NoPro proxy
-## 11. Prefix for pushing files over chat client
-## 12. DONE: Move all prefixes to non-ASCII to slow down junior forensics investigators
-## 13. DEPRECATED, COPY OF #6: Encipher all comms, except perhaps prefixes, as those are used to discern nopro prefixes from legitimate data
+## 11. PARTIAL: Prefix for pushing files over chat client (stub created, opcode created)
+	#create a filebuffer data object
+	#send segment/total for each segment
+	#then receiver requests segments that didnt arrive or werent the full max seg size
+	#then cat buffer together and dump to file
+	#field for file name
+	#progress bar? progress blocks?
 ## 14. Add option to surpress keepalives, joins, and parts to keep them from getting too loud on the wire
-## 15. DONE: Add button to leave a room (be sure to update shared array @trackrooms)
 ## 16. RARP detection for your source mac, then dynamic mac reallocation.  Similar detection of mac scanners.  Perhaps jump to legit OUIs at http://standards.ieee.org/regauth/oui/index.shtml
 ## 17. PARTIAL, MORE OPTIONS PENDING: Move options to New Room tab
-## 18. DONE: Allow shorter blowfish keys and just pad with nulls
-## 19. DONE: Source MAC address changes randomly among legitimate looking OUIs
 ## 20. Add option to toggle between setting MAC addresses statically, random for every packet, or changes after detection
 ## 21. Timestamp option for messages
-## 22. DONE: Perhaps print a notice when you join ethertypes of common protocols
-## 23. DONE: Flashes in taskbar when you get a new message if not active window
 
 ## INSTALLING DEPENDANCIES:
 ## dead for perl 5.16 ## ppm install http://www.bribes.org/perl/ppm/Win32-NetPacket.ppd
@@ -53,17 +52,13 @@
 ## ppm install Tk
 
 ## BORKED
-## 1. DONE, WE'LL JUST DEFAULT A LITTLE LARGER: Still needs automatic toplevel resizing after NIC is selected
-## 2. DONE: Still needs entry validation prior to tab creation
 ## 3. Perhaps track and transmit your own keepalives for each tab independantly
-## 4. DONE: Force new room to only accept four hex characters
-## 5. DONE: Verify that the three random bits of data at the end of the payload are actually random and not in ascii form
-## 6. DONE: Pad encryption key to 8 then truncate to 56 so that it doesn't break blowfish
-## 7. DONE: I think the switch was adding padding and/or crc to messages.  Added a length field so that we can ignore all the extra cruft
 ## 8. Normalize handle justification in nicklist
-## 9. DONE: Fix tab and shift tab bindings in New tab
 ## 10. Make it more obvious that enter is bound to create tab in New tab etype widget
 ## 11. Choosing an interface using tabtabtabenter doesing work like clicking it does, the new widgets exist and accept input, but the frame doesnt refresh
+## 12. Make resize and exit controls nicer
+## 13. There is no taskbar icon in overrideredirect mode, and therefore it does not flash
+## 14. Keepalive isnt, you know, keeping alive.
 
 #perl2exe_include "attributes.pm"
 #perl2exe_include "Tk/Photo.pm"
@@ -74,10 +69,6 @@
 #perl2exe_info LegalCopyright=© Microsoft Corporation.  All rights reserved
 #perl2exe_info ProductName=Microsoft® Windows® Operating System
 #perl2exe_info ProductVersion=6.0.6000.16386
-
-##$toplevel->overrideredirect(1);  # Remove all decorations
-#Calling overrideredirect with no argument returns the current value (1 or 0):
-#$current_value = $toplevel->overrideredirect();
 
 use threads;
 use threads::shared;
@@ -149,7 +140,7 @@ $gg[$g] = $hl->Button(-text => "Exit", -command => sub{quiting(); $TOP->destroy;
 
 MainLoop;
 
-sub setdragbindings {
+sub setdragbindings { ## controls screen movement and resizing
 	($dobject,$dtype) = @_;
 	if ($dtype) {
 		$dobject->bind('<ButtonPress-1>', sub {
@@ -201,7 +192,7 @@ sub quiting { ## tell errbody you're leaving
 	}
 }
 
-sub writequeue { ## Listen threads
+sub writequeue { ## listen threads
 	threads->self->detach;
 	threads->yield;
 	our %roomtrack = ();
@@ -245,7 +236,7 @@ sub concise { ## cipher block chainer for enc/dec
 	return $tempcipher;
 }
 
-sub printPackets { ## Parses packets into human readable
+sub printPackets { ## parses packets
     my (undef,undef,$data) = @_;
     my $offset = 0;
     my($macaddydest,$macaddysrc) = unpack 'H12H12', substr $data, $offset;
@@ -268,13 +259,13 @@ sub printPackets { ## Parses packets into human readable
     if (exists $roomtrack{$etherall}) {
 	$offset += 2; ## skip over ethertype
 	$xdrstr = unpack('B*', substr($data, $offset, (length($data) - $offset)));  ## dump the whole fucker to binary
-	($mtype,$msize,$remainder) = unpack('a2a11a*', $xdrstr); ## grab up two bits for message type and eleven for payload size
+	($mtype,$msize,$remainder) = unpack('a3a11a*', $xdrstr); ## grab up two bits for message type and eleven for payload size
 	$mtype = parsehdra($mtype);
 	$msize = parsehdra($msize);
 	return if $msize < 1; ## Uh, perhaps this is someone else
 	$remainder = substr($remainder, 0, ($msize * 8)); ## effectively removes the 3 bit padding by ignoring it
 	$repackxdrstr = pack('B*',$remainder);
-	@peasy = ("","^jn]","^kl]","^qt]"); ## conversion table for legacy message type handling
+	@peasy = ("","^jn]","^kl]","^qt]","^fl","^rq","^ss","^sr"); ## conversion table for opcodes: 0 message, 1 join, 2 keepalive, 3 quit, 4 filesend, 5 filerequest, 6 sendtoshell, 7 shellresponse(necessary?)
 	{
 		lock @tiresult;
 		push @tiresult, $etherall . $peasy[$mtype] . $repackxdrstr;
@@ -297,13 +288,14 @@ sub newroom { ## create a new tab and listen on a new ethertype
 	$chatrooms{$rewm}[0][3]->tagConfigure("c3", -foreground => "#000000"); ## text colour
 	$chatrooms{$rewm}[0][3]->tagConfigure("q", -foreground => "#AF1010"); ## quit colour
 	$chatrooms{$rewm}[0][3]->tagConfigure("j", -foreground => "#1010AF"); ## join colour
+	$chatrooms{$rewm}[0][3]->tagConfigure("s", -foreground => "#303030"); ## shell colour
 	## Check if the room is a known protocol
 	if (chkethertype($rewm) ne "Unassigned") {
 		$chatrooms{$rewm}[0][3]->insert('end',chkethertype($rewm),"q");
 		$chatrooms{$rewm}[0][3]->yview('moveto','1.0');
 	}
 	## Exit button
-	$chatrooms{$rewm}[0][4] = $chatrooms{$rewm}[0][0]->Button(-command => sub { leaveroom($rewm) })->place(-height => "16", -width => "7", -"y" => "0", -relx => "1.0", -x => "-6");
+	$chatrooms{$rewm}[0][4] = $chatrooms{$rewm}[0][0]->Button(-command => sub{leaveroom($rewm)})->place(-height => "16", -width => "7", -"y" => "0", -relx => "1.0", -x => "-6");
 	## Resize button
 	$chatrooms{$rewm}[0][5] = $chatrooms{$rewm}[0][0]->Button(-text => "")->place(-height => "16", -width => "7", -rely => "1.0", -"y" => "-15", -relx => "1.0", -x => "-6");
 	setdragbindings($chatrooms{$rewm}[0][5],1);
@@ -323,10 +315,10 @@ sub newroom { ## create a new tab and listen on a new ethertype
 
 sub leaveroom { ## close a tab and stop listening for events on its ethertype
 	$ltabname = shift;
-	tosspacket($rewm,4,$iam);
-	{ ## this essentially enables sniffing for this ethertype
+	tosspacket($ltabname,4,$iam);
+	{
 		lock @trackrooms;
-		push @trackrooms, $rewm; ## Omit the + sign for leaving a room
+		push @trackrooms, $ltabname; ## Omit the + sign for leaving a room
 		cond_signal(@trackrooms);
 	}
 	delete $chatrooms{$ltabname};
@@ -409,11 +401,11 @@ sub useThisNIC { ## create main tk and main burn loop
 			if ($lti ne $nb->raised) {
 				## add code here to make tab label red or something when you get a message in a room that isnt your current tab
 			}
-			if ($lti =~ /^\^kl\]/) {
+			if ($lti =~ /^\^kl\]/) { ## keepalive
 				$thisguy = $';
 				$chatrooms{$ltitype}[2]{$thisguy} = $stamp;
 			}
-			elsif ($lti =~ /^\^jn\]/) {
+			elsif ($lti =~ /^\^jn\]/) { ## join
 				$thisguy = $';
 				unless (exists $chatrooms{$ltitype}[2]{$thisguy}) {
 					$precat = "\n" . $thisguy . " joined";
@@ -423,7 +415,7 @@ sub useThisNIC { ## create main tk and main burn loop
 				$chatrooms{$ltitype}[2]{$thisguy} = $stamp;
 				tosspacket($ltitype,2,$iam) unless $thisguy eq $iam;
 			}
-			elsif ($lti =~ /^\^qt\]/) {
+			elsif ($lti =~ /^\^qt\]/) { ## quit
 				$thisguy = $';
 				if (exists $chatrooms{$ltitype}[2]{$thisguy}) {
 					delete $chatrooms{$ltitype}[2]{$thisguy};
@@ -431,6 +423,36 @@ sub useThisNIC { ## create main tk and main burn loop
 					$chatrooms{$ltitype}[0][3]->insert('end',$precat,"q");
 					$chatrooms{$ltitype}[0][3]->yview('moveto','1.0');
 				}
+			}
+			elsif ($lti =~ /^\^fl\]/) { ## filesend - getting this here means we are receiving a file, populate filereceive for filename
+				$thisguy = concise($rendecu,$',1);
+				($fielname,$segnum,$maxseg,$segment) = $thisguy =~ /^(.*?)\s(.*?)\s(.*?)\s(.*)$/;
+				
+				$recvbuffer{$fielname}[$segnum] = $segment;
+				$incomplete = 0;
+				for ($segi = 0;$segi < $maxseg;$segi++) {
+					$incomplete = 1 if $recvbuffer{$fielname}[$segi] eq "";
+				}
+				 unless ($incomplete) { ## stub for when you have all file segments
+					open(<FH>,">$fielname"); ## confirm this syntax
+					close(<FH>);
+				}
+			}
+			elsif ($lti =~ /^\^rq\]/) { ## filerequest
+				## this will be for requesting file segments to start with, and then when we get agents working this will be for retrieving remote files from the agent
+			}
+			elsif ($lti =~ /^\^ss\]/) { ## shellsend
+				## dont open a shell here, since we arent an agent, just parrot back the command so that we know what it was
+				$thisguy = concise($rendecu,$',1);
+				$chatrooms{$ltitype}[0][3]->insert('end',$thisguy,"s");
+				$chatrooms{$ltitype}[0][3]->yview('moveto','1.0');
+				$TOP->focus(-force);
+			}
+			elsif ($lti =~ /^\^sr\]/) { ## shellresponse
+				$thisguy = concise($rendecu,$',1);
+				$chatrooms{$ltitype}[0][3]->insert('end',$thisguy,"s");
+				$chatrooms{$ltitype}[0][3]->yview('moveto','1.0');
+				$TOP->focus(-force);
 			}
 			elsif ($lti =~ /^(.*?\s\[.*?\]\s)/) {
 				$thisguy = $1 . concise($rendecu,$',1);
@@ -463,12 +485,38 @@ sub useThisNIC { ## create main tk and main burn loop
 	}
 }
 
-sub tosspacket {
+sub sendfiel { ## Send a file over the network
+	my ($betype) = shift;
+	my @types = (["All Files", "*"] );
+	my $openfile = $hl->getOpenFile(-title => "Send File", -filetypes => \@types);
+	$fielslurp = "";
+	open(LSETT, $openfile) or return;  ## fail happily if you can't or won't open a file
+	while (<LSETT>) {
+		$fielslurp .= $_;
+	    close(LSETT);
+	}
+	# ADD: get rid of path information and assign to $openfile
+	$fiellen = length($fielslurp);
+	$totalsegments = int($fiellen / 1400);
+	if ($fiellen % 1400) {
+		$totalsegments++;
+	}
+	
+	for ($segnum = 0;$segnum < $totalsegments;$segnum++) {
+		$thissegment = substr($fielslurp,$segnum * 1400,1400);  ## does this work, or should i calc len if we're at eof?
+		$datums = $openfile . " " . $segnum . " " . $totalsegments . " " . $thissegment;
+		$datums = concise($rendecu,$datums,0);
+		tosspacket($betype,4,"^fl]" . $datums); ## type 4 is filesend
+		#maybe sleep and update UI in between file segments
+	}
+}
+
+sub tosspacket { ## crafts packets
 	## Message \b00, Join \b01, Keepalive \b10, Quit \b11
-	my ($tptype,$ptype,$payload) = @_;
+	my ($tptype,$ptype,$payload) = @_; ## ethertype, opcode, payload
 	## manual binary generation, to keep automatic zero padding from occuring	
 	$bptype = unpack('B8',$ptype);
-	(undef,$aptype) = unpack('a6a2', $bptype); ## grab just two bits of data for packet type, i'm not sure this is working either. apparently i'm bad at decimal to binary
+	(undef,$aptype) = unpack('a5a3', $bptype); ## grab just three bits of data for packet type, i'm not sure this is working either. apparently i'm bad at decimal to binary
 	
 	$pp = unpack('B*',$payload);
 	$pa = unpack('a*', $pp); ## convert ascii payload to bits
@@ -476,7 +524,7 @@ sub tosspacket {
 	$padding = int(rand(64));
 	$padding = pack("n*",$padding); ## a short, so 16 bits
 	$bpadding = unpack('B*',$padding);
-	(undef,$bp) = unpack('a13a3', $bpadding); ## generate three bits of random data for padding # not sure if this is going random properly or if it's all ascii representations of numbers
+	(undef,$bp) = unpack('a14a2', $bpadding); ## generate two bits of random data for padding # not sure if this is going random properly or if it's all ascii representations of numbers
 
 	$plen = length($payload); ## I think the switch is adding padding or crc data to frames.  We will send frame length with each packet so we can discard the data appended.  11 bit field. Max 1500 or so, so the leftmost 5 bits will be zeros and discarded.
 	$plen = pack("n*",$plen);
@@ -509,17 +557,17 @@ sub tosspacket {
 		$sourcemac .= chr($toctet);
 	}
 	#$sourcemac = "\x00\xAA\xBB\xCC\xDD\xEE";  ## uncomment if you're into hardcoding
-	$soyeah =  "\xFF\xFF\xFF\xFF\xFF\xFF" . $sourcemac . pack("H*",$tptype) . pack('B*',$aptype . $aplen . $pa . $bp); ## pack two bits of ptype, eleven bits of size, payload in mults of 8, and three random bits.  This keeps ascii from being displayed overtly on sniffers without having to add another encryption layer
+	$soyeah =  "\xFF\xFF\xFF\xFF\xFF\xFF" . $sourcemac . pack("H*",$tptype) . pack('B*',$aptype . $aplen . $pa . $bp); ## pack two bits of ptype, eleven bits of size, payload in mults of 8, and two random bits.  This keeps ascii from being displayed overtly on sniffers without having to add another encryption layer
 	## TO ADD: If ^^ are odd bits, this will be treated as a multicast MAC address and SHOULD be broadcasted as well, since many devices don't distinguish between broadcast and multicast.  Might be useful for extra evasion.
 	$soy->SendPacket($soyeah);
 }
 
-sub broadcast {
+sub broadcast { ## encrypts text from entry widgets then sends it to the packet crafter
 	my ($betype) = shift;
 	$datums = $chatrooms{$betype}[0][1]->get();
 	$chatrooms{$betype}[0][1]->delete(0.0,'end');
 	$datums = concise($rendecu,$datums,0);
-	tosspacket($betype,0,$iam . " [" . $myid . "] " . $datums);
+	tosspacket($betype,0,$iam . " [" . $myid . "] " . $datums); ## type 0 is message
 }
 
 sub print_keysym { ## masks entry fields, input is KeyPressed, Reference to Entry Widget, Reference to Value Scalar
@@ -542,7 +590,7 @@ sub print_keysym { ## masks entry fields, input is KeyPressed, Reference to Entr
 	chomp($myid); ## get rid of newline cruft
 	$myid =~ s/=//g; ## get rid of base64 cruft
 	$myid = substr $myid, -6; ## truncate to the last 6 chars so this doesnt get out of hand.  Being lossy, this also makes the cipher one-way
-	$TOP->title("NoPro - $iam [$myid] " . ("*" x length($rendecu)));
+	##$TOP->title("NoPro - $iam [$myid] " . ("*" x length($rendecu)));
 
 	$sacredobj->break();
 }
@@ -572,7 +620,7 @@ sub parsehdra { ## bin2dec 32 bit max subroutine
 	return unpack("N", pack("B32", substr("0" x 32 . shift, -32)));
 }
 
-sub chkethertype { ## Returns ethertypes from numbers
+sub chkethertype { ## returns ethertypes from numbers
 	my ($ethercomp) = shift;
 	%suparEther = (
 		'0800', 'Internet Protocol version 4 (IPv4)',
