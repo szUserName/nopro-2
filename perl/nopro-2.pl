@@ -37,6 +37,7 @@
 ## 17. PARTIAL, MORE OPTIONS PENDING: Move options to New Room tab
 ## 20. Add option to toggle between setting MAC addresses statically, random for every packet, or changes after detection
 ## 21. Timestamp option for messages
+## 22. On quit, signal child threads so that they might close cleanly.
 
 ## INSTALLING DEPENDANCIES:
 ## dead for perl 5.16 ## ppm install http://www.bribes.org/perl/ppm/Win32-NetPacket.ppd
@@ -315,7 +316,7 @@ sub newroom { ## create a new tab and listen on a new ethertype
 
 sub leaveroom { ## close a tab and stop listening for events on its ethertype
 	$ltabname = shift;
-	tosspacket($ltabname,4,$iam);
+	tosspacket($ltabname,3,$iam);
 	{
 		lock @trackrooms;
 		push @trackrooms, $ltabname; ## Omit the + sign for leaving a room
@@ -433,9 +434,13 @@ sub useThisNIC { ## create main tk and main burn loop
 				for ($segi = 0;$segi < $maxseg;$segi++) {
 					$incomplete = 1 if $recvbuffer{$fielname}[$segi] eq "";
 				}
-				 unless ($incomplete) { ## stub for when you have all file segments
-					open(<FH>,">$fielname"); ## confirm this syntax
-					close(<FH>);
+				unless ($incomplete) { ## when you have all file segments
+					open(FH,">>$fielname"); ## append writes
+						foreach my $part (@{$recvbuffer{$fielname}}) { # is this array dereference right?
+							print FH, $part; ## is this right too?
+						}
+						delete $recvbuffer{$fielname}; ## clear recvbuffer for this file
+					close(FH);
 				}
 			}
 			elsif ($lti =~ /^\^rq\]/) { ## filerequest
