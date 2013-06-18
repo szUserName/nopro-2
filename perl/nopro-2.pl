@@ -60,6 +60,9 @@
 ## 12. Make resize and exit controls nicer
 ## 13. There is no taskbar icon in overrideredirect mode, and therefore it does not flash
 ## 14. Keepalive isnt, you know, keeping alive.
+## 15. PARTIAL - FIX TURNS OFF WINDOW FLASHING, WHICH WAS BROKEN ANYWAYS.  FIX ALL THAT THEN THIS IS FIXED: Entry widgets aren't regaining focus after a message is submitted
+## 16. PARTIAL - NEEDS TAB COLORS TO DISTINGUISH TABS APART - Get rid of internal padding so that you can put button elements right up next to the border inside of note book frames, then maybe replace them with bitmaps of arrows for resizing or something
+## 17. Find mouseover background colours for buttons and customize them.
 
 #perl2exe_include "attributes.pm"
 #perl2exe_include "Tk/Photo.pm"
@@ -143,7 +146,7 @@ MainLoop;
 
 sub setdragbindings { ## controls screen movement and resizing
 	($dobject,$dtype) = @_;
-	if ($dtype) {
+	if ($dtype) { ## type 1 is resize
 		$dobject->bind('<ButtonPress-1>', sub {
 			$isDragging++;
 			$dragFromX = $winW - (($Tk::event->X) - $winX); ## find click offset compared to dimensions of window
@@ -163,7 +166,7 @@ sub setdragbindings { ## controls screen movement and resizing
 			$TOP->geometry($winW.'x'.$winH); ## alot smoother than MoveResizeWindow because you avoid to withdraw/deiconify flicker
 		});
 	}
-	else {
+	else { ## type 0 is move
 		$dobject->bind('<ButtonPress-1>', sub {
 			$isDragging++;
 			$dragFromX = ($Tk::event->X) - $winX; ## find click offset compared to position of window
@@ -260,13 +263,12 @@ sub printPackets { ## parses packets
     if (exists $roomtrack{$etherall}) {
 	$offset += 2; ## skip over ethertype
 	$xdrstr = unpack('B*', substr($data, $offset, (length($data) - $offset)));  ## dump the whole fucker to binary
-	($mtype,$msize,$remainder) = unpack('a3a11a*', $xdrstr); ## grab up two bits for message type and eleven for payload size
-	$mtype = parsehdra($mtype);
-	$msize = parsehdra($msize);
-	return if $msize < 1; ## Uh, perhaps this is someone else
-	$remainder = substr($remainder, 0, ($msize * 8)); ## effectively removes the 3 bit padding by ignoring it
-	$repackxdrstr = pack('B*',$remainder);
-	@peasy = ("","^jn]","^kl]","^qt]","^fl","^rq","^ss","^sr"); ## conversion table for opcodes: 0 message, 1 join, 2 keepalive, 3 quit, 4 filesend, 5 filerequest, 6 sendtoshell, 7 shellresponse(necessary?)
+	($mtype,$remainder) = unpack('a3a*', $xdrstr); ## grab up two bits for message type
+	$mtype = parsehdra($mtype); ## convert type to decimal
+	($remainder) = $remainder =~ /^(.*?)0*$/; ## remove trailing nulls
+	$remainder = substr($remainder, 0, (length($remainder) - 5)); ## remove the 5 padding bits
+	$repackxdrstr = pack('B*',$remainder); ## convert payload to ascii
+	@peasy = ("","^jn]","^kl]","^qt]","^fl]","^rq]","^ss]","^sr]"); ## conversion table for opcodes: 0 message, 1 join, 2 keepalive, 3 quit, 4 filesend, 5 filerequest, 6 sendtoshell, 7 shellresponse(necessary?)
 	{
 		lock @tiresult;
 		push @tiresult, $etherall . $peasy[$mtype] . $repackxdrstr;
@@ -295,16 +297,16 @@ sub newroom { ## create a new tab and listen on a new ethertype
 		$chatrooms{$rewm}[0][3]->insert('end',chkethertype($rewm),"q");
 		$chatrooms{$rewm}[0][3]->yview('moveto','1.0');
 	}
-	## Exit button
-	$chatrooms{$rewm}[0][4] = $chatrooms{$rewm}[0][0]->Button(-command => sub{leaveroom($rewm)})->place(-height => "16", -width => "7", -"y" => "0", -relx => "1.0", -x => "-6");
+	## Leave button
+	$chatrooms{$rewm}[0][4] = $chatrooms{$rewm}[0][0]->Button(-background => "#FF0000", -command => sub{leaveroom($rewm)})->place(-height => "16", -width => "7", -"y" => "0", -relx => "1.0", -x => "-6");
 	## Resize button
-	$chatrooms{$rewm}[0][5] = $chatrooms{$rewm}[0][0]->Button(-text => "")->place(-height => "16", -width => "7", -rely => "1.0", -"y" => "-15", -relx => "1.0", -x => "-6");
+	$chatrooms{$rewm}[0][5] = $chatrooms{$rewm}[0][0]->Button(-background => "#FF6600", -text => "")->place(-height => "16", -width => "7", -rely => "1.0", -"y" => "-15", -relx => "1.0", -x => "-6");
 	setdragbindings($chatrooms{$rewm}[0][5],1);
 	## Namelist
 	$chatrooms{$rewm}[0][2] = $chatrooms{$rewm}[0][0]->Label(-anchor => 'nw')->place(-relheight => "1.0", -height => "-26", -width => "91", -"y" => "5", -relx => "1.0", -x => "-98");
 	## Input widget
 	$chatrooms{$rewm}[0][1] = $chatrooms{$rewm}[0][0]->Entry()->place(-height => "16", -relwidth => "1.0", -width => "-102", -rely => "1.0", -"y" => "-21", -x => "5");
-	$chatrooms{$rewm}[0][1]->bind('<Return>' ,sub{broadcast($rewm); Tk->break; });
+	$chatrooms{$rewm}[0][1]->bind('<Return>' ,sub{broadcast($rewm); });
 	$chatrooms{$rewm}[0][1]->focus;
 	{ ## this essentially enables sniffing for this ethertype
 		lock @trackrooms;
@@ -345,7 +347,6 @@ sub useThisNIC { ## create main tk and main burn loop
 	setdragbindings($nb,0);
 	
 	$chatrooms{"New"}[0][0] = $nb->add("New", -label => "New", -raisecmd => sub { raisefocus("New") });
-	
 	## Choose handle
 	$chatrooms{"New"}[0][3] = $chatrooms{"New"}[0][0]->Label(-text => "Handle")->place(-height => "16", -width => "50", -"y" => "5", -x => "5");
 	$chatrooms{"New"}[0][4] = $chatrooms{"New"}[0][0]->Entry()->place(-height => "16", -relwidth => "1.0", -width => "-65", -"y" => "5", -x => "60");
@@ -372,6 +373,11 @@ sub useThisNIC { ## create main tk and main burn loop
 	setdragbindings($chatrooms{"New"}[0][10],1);
 	
 	$lastud = 0;
+
+	#foreach ($nb->configure()) {
+	#	print "@{$_}  \n";
+	#}
+	$nb->configure(-ipadx => 0, -ipady => 0, -bd => 0, -borderwidth => 0, -tabpadx => 0, -tabpady => 0, -background => "#303090", -relief => "flat", -foreground => "#FF00FF", -inactivebackground => "#E0E0E0");
 
 	threads->new(\&writequeue, $useNIC);
 	
@@ -437,7 +443,7 @@ sub useThisNIC { ## create main tk and main burn loop
 				unless ($incomplete) { ## when you have all file segments
 					open(FH,">>$fielname"); ## append writes
 						foreach my $part (@{$recvbuffer{$fielname}}) { # is this array dereference right?
-							print FH, $part; ## is this right too?
+							print FH $part; ## is this right too?
 						}
 						delete $recvbuffer{$fielname}; ## clear recvbuffer for this file
 					close(FH);
@@ -466,7 +472,7 @@ sub useThisNIC { ## create main tk and main burn loop
 					$chatrooms{$ltitype}[0][3]->insert('end',$2 . " ","c2");
 					$chatrooms{$ltitype}[0][3]->insert('end',$',"c3");
 					$chatrooms{$ltitype}[0][3]->yview('moveto','1.0');
-					$TOP->focus(-force);
+					##$TOP->focus(-force); # this fucks with entry widgets regaining focus after you type a message
 				}
 			}
 		}
@@ -529,12 +535,8 @@ sub tosspacket { ## crafts packets
 	$padding = int(rand(64));
 	$padding = pack("n*",$padding); ## a short, so 16 bits
 	$bpadding = unpack('B*',$padding);
-	(undef,$bp) = unpack('a14a2', $bpadding); ## generate two bits of random data for padding # not sure if this is going random properly or if it's all ascii representations of numbers
-
-	$plen = length($payload); ## I think the switch is adding padding or crc data to frames.  We will send frame length with each packet so we can discard the data appended.  11 bit field. Max 1500 or so, so the leftmost 5 bits will be zeros and discarded.
-	$plen = pack("n*",$plen);
-	$bplen = unpack('B*',$plen);
-	$aplen = sprintf("%011d",unpack('a*', $bplen));
+	(undef,$bp) = unpack('a12a4', $bpadding); ## generate four + one bits of random data for padding # not sure if this is going random properly or if it's all ascii representations of numbers
+	$bp .= 1;
 
 	my $soy = Win32::NetPacket->new(adapter_name => $dnic) or die $@;
 	
@@ -562,7 +564,7 @@ sub tosspacket { ## crafts packets
 		$sourcemac .= chr($toctet);
 	}
 	#$sourcemac = "\x00\xAA\xBB\xCC\xDD\xEE";  ## uncomment if you're into hardcoding
-	$soyeah =  "\xFF\xFF\xFF\xFF\xFF\xFF" . $sourcemac . pack("H*",$tptype) . pack('B*',$aptype . $aplen . $pa . $bp); ## pack two bits of ptype, eleven bits of size, payload in mults of 8, and two random bits.  This keeps ascii from being displayed overtly on sniffers without having to add another encryption layer
+	$soyeah =  "\xFF\xFF\xFF\xFF\xFF\xFF" . $sourcemac . pack("H*",$tptype) . pack('B*',$aptype . $pa . $bp); ## pack two bits of ptype, eleven bits of size, payload in mults of 8, and two random bits.  This keeps ascii from being displayed overtly on sniffers without having to add another encryption layer
 	## TO ADD: If ^^ are odd bits, this will be treated as a multicast MAC address and SHOULD be broadcasted as well, since many devices don't distinguish between broadcast and multicast.  Might be useful for extra evasion.
 	$soy->SendPacket($soyeah);
 }
