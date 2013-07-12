@@ -12,6 +12,7 @@
 ##				widgets (0) [tab(0),entry(1),label(2),scrolled(3),close(4),resize(5)] OR [tab(0),etype(1),letype(2),lnick(3),nick(4),ltrip(5),trip(6),lkey(7),key(8),exit(9),resize(10)] for New tab
 ##				messages (1) [messageindex][handle,tripcode,message]
 ##				userlist (2) {username => lasttimestamp}
+##				updatepending (3)
 ##			   ]
 
 ## FEATURES TO ADD:
@@ -55,14 +56,15 @@
 ## BORKED
 ## 3. Perhaps track and transmit your own keepalives for each tab independantly
 ## 8. Normalize handle justification in nicklist
-## 10. Make it more obvious that enter is bound to create tab in New tab etype widget
+## 10. FIXED: Make it more obvious that enter is bound to create tab in New tab etype widget
 ## 11. Choosing an interface using tabtabtabenter doesing work like clicking it does, the new widgets exist and accept input, but the frame doesnt refresh
 ## 12. Make resize and exit controls nicer
 ## 13. There is no taskbar icon in overrideredirect mode, and therefore it does not flash
 ## 14. Keepalive isnt, you know, keeping alive.
 ## 15. PARTIAL - FIX TURNS OFF WINDOW FLASHING, WHICH WAS BROKEN ANYWAYS.  FIX ALL THAT THEN THIS IS FIXED: Entry widgets aren't regaining focus after a message is submitted
-## 16. PARTIAL - NEEDS TAB COLORS TO DISTINGUISH TABS APART - Get rid of internal padding so that you can put button elements right up next to the border inside of note book frames, then maybe replace them with bitmaps of arrows for resizing or something
+## 16. FIXED - Get rid of internal padding so that you can put button elements right up next to the border inside of note book frames, then maybe replace them with bitmaps of arrows for resizing or something
 ## 17. Find mouseover background colours for buttons and customize them.
+## 18. Change individual tab colours for when a channel had an update
 
 #perl2exe_include "attributes.pm"
 #perl2exe_include "Tk/Photo.pm"
@@ -82,8 +84,20 @@ use Crypt::Blowfish_PP;
 use MIME::Base64;
 use Tk;
 use Tk::NoteBook;
+use Getopt::Long qw(:config bundling);
+our $doansi = 0;
+my $halp = 0;
 
+GetOptions(
+	"a" => \$doansi,
+	"h" => \$halp
+	);
 
+if ($halp > 0) {
+	print "-h\tThis cruft\n";
+	print "-a\tANSI color output\n";
+	exit;
+}
 our @tiresult: shared;
 our @trackrooms: shared;
 our @ltiresult;
@@ -97,15 +111,15 @@ our %chatrooms = ();
 our $nb;
 our $rendecu = "allcalma";
 our $tcode = "";
+our $active = "New";
 
 $|++;
 
-print "Running as UID $> at PID $$\n";
-
+print "Running as UID ".ap(31)."$>".ap(0)." at PID ".ap(31)."$$".ap(0)."\n";
 my @adpts = Net::Pcap::findalldevs(\$err);
 @adpts > 0 or die "No adapters installed !\n";
 $numadpt = @adpts;
-print "$numadpt adapters found... ";
+print ap(36)."$numadpt".ap(0)." adapters found... ";
 
 my $winH = 176 + (($numadpt + 1) * 16);
 my $winW = 320;
@@ -143,6 +157,15 @@ for ($g = 0;$g < $numadpt;$g++) {
 $gg[$g] = $hl->Button(-text => "Exit", -command => sub{quiting(); $TOP->destroy;})->place(-relwidth => "1.0", -width => "-10", -"y" => (($g * 16) + 5), -height => "16", -x => "5");
 
 MainLoop;
+
+sub ap {
+	# 0	Reset / Normal	all attributes off
+	# 5	Blink: Slow	less than 150 per minute
+	# 30–37	Set text color	30 + x, where x is from the color table below
+	# 0	1	2	3	4	5	6	7
+	# Black	Red	Green	Yellow	Blue	Magenta	Cyan	White
+	return $doansi>0?"\033[".shift."m":"";
+}
 
 sub setdragbindings { ## controls screen movement and resizing
 	($dobject,$dtype) = @_;
@@ -281,7 +304,8 @@ sub newroom { ## create a new tab and listen on a new ethertype
 	my ($rewm) = shift;
 	
 	$rewm = uc($rewm);
-	$chatrooms{$rewm}[0][0] = $nb->add($rewm, -label => $rewm, -raisecmd => sub { raisefocus($rewm) });
+	$chatrooms{$rewm}[3] = "0";
+	$chatrooms{$rewm}[0][0] = $nb->add($rewm, -label => $rewm, -raisecmd => sub { raisefocus($rewm) }, -createcmd => [\&raisefocus, "New"]);
 	$nb->raise($rewm);
 	## Text field
 	$chatrooms{$rewm}[0][3] = $chatrooms{$rewm}[0][0]->Scrolled(Text, -relief => "sunken", -borderwidth => "1", -setgrid => "false", -height => "32", -scrollbars => "oe", -wrap => "word", -takefocus => "0")->place(-relheight => "1.0", -height => "-28", -relwidth => "1.0", -width => "-102", -"y" => "5", -x => "5");
@@ -313,6 +337,7 @@ sub newroom { ## create a new tab and listen on a new ethertype
 		push @trackrooms, "+" . $rewm; ## Omit the + sign for leaving a room
 		cond_signal(@trackrooms);
 	}
+	
 	tosspacket($rewm,1,$iam);
 }
 
@@ -329,24 +354,24 @@ sub leaveroom { ## close a tab and stop listening for events on its ethertype
 }
 
 sub raisefocus{ ## puts keyboard focus on the entry widgets when you switch tabs
-	$tabname = shift;
-	if ($chatrooms{$tabname}[0][1]) { ## This keeps raisefocus from raising errors before the entry widgets are defined
-		$chatrooms{$tabname}[0][1]->focus;
+	$active = shift;
+	$chatrooms{$active}[3] = 0; ## Reset pending updates counter for this room
+	if ($chatrooms{$active}[0][1]) { ## This keeps raisefocus from raising errors before the entry widgets are defined
+		$chatrooms{$active}[0][1]->focus;
 	}
 }
 
 sub useThisNIC { ## create main tk and main burn loop
 	my ($useNIC) = @_;
 	$dnic = $adpts[$useNIC];
-
 	foreach my $zong (@gg) {
 		$zong->placeForget;
 	}
-	
+
 	$nb = $hl->NoteBook(-tabpadx => 0, -tabpady => 0)->place(-relheight => "1.0", -relwidth => "1.0");
 	setdragbindings($nb,0);
-	
-	$chatrooms{"New"}[0][0] = $nb->add("New", -label => "New", -raisecmd => sub { raisefocus("New") });
+	$chatrooms{"New"}[3] = "0";
+	$chatrooms{"New"}[0][0] = $nb->add("New", -label => "New", -raisecmd => sub { raisefocus("New") }, -createcmd => [\&raisefocus, "New"]);
 	## Choose handle
 	$chatrooms{"New"}[0][3] = $chatrooms{"New"}[0][0]->Label(-text => "Handle")->place(-height => "16", -width => "50", -"y" => "5", -x => "5");
 	$chatrooms{"New"}[0][4] = $chatrooms{"New"}[0][0]->Entry()->place(-height => "16", -relwidth => "1.0", -width => "-65", -"y" => "5", -x => "60");
@@ -363,9 +388,10 @@ sub useThisNIC { ## create main tk and main burn loop
 	$chatrooms{"New"}[0][8]->insert('end',"*" x length($rendecu));
 	## Join a channel
 	$chatrooms{"New"}[0][2] = $chatrooms{"New"}[0][0]->Label(-text => "EType")->place(-height => "16", -width => "50", -"y" => "53", -x => "5");
-	$chatrooms{"New"}[0][1] = $chatrooms{"New"}[0][0]->Entry()->place(-height => "16", -relwidth => "1.0", -width => "-65", -"y" => "53", -x => "60");
+	$chatrooms{"New"}[0][1] = $chatrooms{"New"}[0][0]->Entry()->place(-height => "16", -relwidth => "1.0", -width => "-100", -"y" => "53", -x => "60");
 	$chatrooms{"New"}[0][1]->bind('<Key>' => [\&newroomvalidation,Ev('N'),$chatrooms{"New"}[0][1],\$ethertype]);
 	$chatrooms{"New"}[0][1]->insert('end',$ethertype);
+	$chatrooms{"New"}[0][11] = $chatrooms{"New"}[0][0]->Button(-text => "Join", -command => [\&newroomvalidation,'65293','65293',$chatrooms{"New"}[0][1],\$ethertype])->place(-height => "16", -relx => "1.0", -width => "35", -"y" => "53", -x => "-40"); ## hardcoded 65293 makes this work like an enter key, we pass it twice because command callbacks are different than keybind callbacks, apparently
 	## Exit button
 	$chatrooms{"New"}[0][9] = $chatrooms{"New"}[0][0]->Button(-text => "Exit", -command => sub{quiting(); $TOP->destroy;})->place(-height => "16", -width => "50", -"y" => "69", -x => "5");
 	## Resize button
@@ -374,13 +400,10 @@ sub useThisNIC { ## create main tk and main burn loop
 	
 	$lastud = 0;
 
-	#foreach ($nb->configure()) {
-	#	print "@{$_}  \n";
-	#}
-	$nb->configure(-ipadx => 0, -ipady => 0, -bd => 0, -borderwidth => 0, -tabpadx => 0, -tabpady => 0, -background => "#303090", -relief => "flat", -foreground => "#FF00FF", -inactivebackground => "#E0E0E0");
-
+	$nb->configure(-bd => 1, -background => "#303090", -foreground => "#FF00FF", -inactivebackground => "#E0E0E0");
+		
 	threads->new(\&writequeue, $useNIC);
-	
+
 	while (1) { ##  main burn loop, checks for new messages, handles updates to ulist and does keepalive pings
 		select(undef, undef, undef, 0.02); ## Burn Slower
 		$TOP->update();
@@ -472,12 +495,21 @@ sub useThisNIC { ## create main tk and main burn loop
 					$chatrooms{$ltitype}[0][3]->insert('end',$2 . " ","c2");
 					$chatrooms{$ltitype}[0][3]->insert('end',$',"c3");
 					$chatrooms{$ltitype}[0][3]->yview('moveto','1.0');
-					##$TOP->focus(-force); # this fucks with entry widgets regaining focus after you type a message
+					##$TOP->focus(-force); # this fucks with entry widgets regaining focus after you type a message, move this outside just message events anyways
+					unless ($ltitype eq $active) {
+						$chatrooms{$ltitype}[3]++; ## flash message updates, move this to all updates later
+					}
 				}
 			}
 		}
 		@ltiresult = ();
 		foreach my $checkfordead (keys %chatrooms) {
+			if ($chatrooms{$checkfordead}[3] > 0) {
+				#$chatrooms{$checkfordead}[0][0]->configure(-label => "");
+				#$TOP->update;
+				#$chatrooms{$checkfordead}[0][0]->configure(-label => $checkfordead);
+				#$TOP->update;
+			}
 			unless ($checkfordead eq "New") {
 				$precat = "";
 				foreach my $uname (sort keys %{$chatrooms{$checkfordead}[2]}) {
