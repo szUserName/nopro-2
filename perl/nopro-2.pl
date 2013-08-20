@@ -7,6 +7,8 @@
 ## Fait par TUW
 ## Mai13
 
+## Compile with: pp -o nopro.exe nopro-2.pl
+
 ## DATA STRUCTURE:
 ## %chatrooms{$ethertype}[
 ##				widgets (0) [tab(0),entry(1),label(2),scrolled(3),close(4),resize(5)] OR [tab(0),etype(1),letype(2),lnick(3),nick(4),ltrip(5),trip(6),lkey(7),key(8),exit(9),resize(10)] for New tab
