@@ -150,6 +150,14 @@ sub printPackets { ## Parses packets into human readable, crafts response based 
 	$i += 2; ## skip over ethertype for payload printing
 	$etherall = uc($etherall);
 	#print "Network Layer Protocol: $etherall";
+	$vlan = "";
+	while ($etherall eq "8100" || $etherall eq "88A8") { ## found VLAN stuffs, iterate for QinQinQin....
+		$vlan .= "Network Layer Protocol: " . ethertype($etherall) . " ";
+		($tci,$etherall) = unpack 'B16H4', substr $data, $i;
+		($pcp,$dei,$vid) = unpack 'a3a1a12', substr $tci, 0;
+		$i += 4; ## skip over ethertype for payload printing
+		$vlan .= "Priority Code Point: " . parsehdra($pcp) . " Drop Eligible Indicator: " . parsehdra($dei) . " VLAN Identifier: " . parsehdra($vid) . "\n";
+	}
 
 	if($etherall eq "0800") {
 		return if $suppress0800 > 0;
@@ -161,6 +169,7 @@ sub printPackets { ## Parses packets into human readable, crafts response based 
 		return;
 	}
 	print thetime() . ap($nocolour) . "MAC SRC:" . ap("1;32") . $macaddysrc . ap($nocolour) . " MAC DEST:" . ap("1;31") . $macaddydest . ap(0) . "\n";
+	print $vlan;
 	if (hex($etherall) < 0x05dc) { ## I'm still not 100% certain this is working as intended, but it seems to work
 		print ap($nocolour) . "Network Layer Protocol: " . ap("1;35") . $etherall . " IEEE802.3 LLC SAP Frame" . ap(0) . "\n";
 	}
