@@ -13,7 +13,7 @@
 ## %chatrooms{$ethertype}[
 ##				widgets (0) [tab(0),entry(1),label(2),scrolled(3),close(4),resize(5)] OR [tab(0),etype(1),letype(2),lnick(3),nick(4),ltrip(5),trip(6),lkey(7),key(8),exit(9),resize(10)] for New tab
 ##				messages (1) [messageindex][handle,tripcode,message]
-##				userlist (2) {username => lasttimestamp}
+##				userlist (2) {username => [lastactiveheartbeattimestamp,lastpackettimestamp]}
 ##				updatepending (3)
 ##			   ]
 
@@ -41,6 +41,10 @@
 ## 20. Add option to toggle between setting MAC addresses statically, random for every packet, or changes after detection
 ## 21. Timestamp option for messages
 ## 22. On quit, signal child threads so that they might close cleanly.
+## 23. Nicklist colouring to see who has active heartbeat, heatmap for those who dont heartbeat, 700 seconds until ice cold to allow for two heartbeat intervals.
+## 24. User messages, joins, etc used as heartbeats to limit actual heartbeats required.  Only send heartbeat if you've been idle on the wire.  Active heartbeat won't be necessary if you never idle, otherwise you get an active heartbeat nick.
+## 25. So three heartbeat modes, Active, Adaptive, Disabled.
+## 26. User define the heartbeat timings in the UI i guess, if users like that sort of thing and don't want colours changing so often.
 
 ## INSTALLING DEPENDANCIES:
 ## dead for perl 5.16 ## ppm install http://www.bribes.org/perl/ppm/Win32-NetPacket.ppd
@@ -67,6 +71,8 @@
 ## 16. FIXED - Get rid of internal padding so that you can put button elements right up next to the border inside of note book frames, then maybe replace them with bitmaps of arrows for resizing or something
 ## 17. Find mouseover background colours for buttons and customize them.
 ## 18. Change individual tab colours for when a channel had an update
+## 19. FIXED: joins were still using the old data structure, overriding the anonymous array - You get frozen out as soon as you join a channel
+## 20. DONE - Standarized and enlarged exit and resize buttons
 
 #perl2exe_include "attributes.pm"
 #perl2exe_include "Tk/Photo.pm"
@@ -156,8 +162,10 @@ for ($g = 0;$g < $numadpt;$g++) {
 	$thisone = sprintf "%d.%d.%d.%d\/%d.%d.%d.%d",(($nip & 0xFF000000)>>24),(($nip & 0x00FF0000)>>16),(($nip & 0x0000FF00)>>8),($nip & 0x000000FF),(($nmask & 0xFF000000)>>24),(($nmask & 0x00FF0000)>>16),(($nmask & 0x0000FF00)>>8),($nmask & 0x000000FF);
 	$gg[$g] = $hl->Button(-text => $thisone, -command => [ \&useThisNIC, $g ])->place(-relwidth => "1.0", -width => "-10", -"y" => (($g * 16) + 5), -height => "16", -x => "5");
 }
-$gg[$g] = $hl->Button(-text => "Exit", -command => sub{quiting(); $TOP->destroy;})->place(-relwidth => "1.0", -width => "-10", -"y" => (($g * 16) + 5), -height => "16", -x => "5");
-
+$gg[$g] = $hl->Button(-text => "Exit", -background => "#FF0000", -command => sub{quiting(); $TOP->destroy;})->place(-height => "16", -width => "45", -rely => "1.0", -"y" => "-15", -relx => "1.0", -x => "-89");
+$g++;
+$gg[$g] = $hl->Button(-text => "Resize", -background => "#FF6600")->place(-height => "16", -width => "45", -rely => "1.0", -"y" => "-15", -relx => "1.0", -x => "-44");
+setdragbindings($gg[$g],1);
 MainLoop;
 
 sub ap {
@@ -324,12 +332,20 @@ sub newroom { ## create a new tab and listen on a new ethertype
 		$chatrooms{$rewm}[0][3]->yview('moveto','1.0');
 	}
 	## Leave button
-	$chatrooms{$rewm}[0][4] = $chatrooms{$rewm}[0][0]->Button(-background => "#FF0000", -command => sub{leaveroom($rewm)})->place(-height => "16", -width => "7", -"y" => "0", -relx => "1.0", -x => "-6");
+	$chatrooms{$rewm}[0][4] = $chatrooms{$rewm}[0][0]->Button(-text => "Close", -background => "#FF0000", -command => sub{leaveroom($rewm)})->place(-height => "16", -width => "45", -rely => "1.0", -"y" => "-15", -relx => "1.0", -x => "-89");
 	## Resize button
-	$chatrooms{$rewm}[0][5] = $chatrooms{$rewm}[0][0]->Button(-background => "#FF6600", -text => "")->place(-height => "16", -width => "7", -rely => "1.0", -"y" => "-15", -relx => "1.0", -x => "-6");
+	$chatrooms{$rewm}[0][5] = $chatrooms{$rewm}[0][0]->Button(-text => "Resize", -background => "#FF6600")->place(-height => "16", -width => "45", -rely => "1.0", -"y" => "-15", -relx => "1.0", -x => "-44");
 	setdragbindings($chatrooms{$rewm}[0][5],1);
 	## Namelist
-	$chatrooms{$rewm}[0][2] = $chatrooms{$rewm}[0][0]->Label(-anchor => 'nw')->place(-relheight => "1.0", -height => "-26", -width => "91", -"y" => "5", -relx => "1.0", -x => "-98");
+	#$chatrooms{$rewm}[0][2] = $chatrooms{$rewm}[0][0]->Label(-anchor => 'nw')->place(-relheight => "1.0", -height => "-26", -width => "91", -"y" => "5", -relx => "1.0", -x => "-98");
+	$chatrooms{$rewm}[0][2] = $chatrooms{$rewm}[0][0]->Text()->place(-relheight => "1.0", -height => "-26", -width => "91", -"y" => "5", -relx => "1.0", -x => "-98");
+	$chatrooms{$rewm}[0][2]->tagConfigure("hb", -background => "#00FF00"); ## heartbeat good colour, for active heartbeat while idle, lasts 700 seconds
+	$chatrooms{$rewm}[0][2]->tagConfigure("hc1", -background => "#FF0000"); ## heatmap warm colour, these are all for passive heartbeats based on message traffic, degrades one per minute
+	$chatrooms{$rewm}[0][2]->tagConfigure("hc2", -background => "#FF33CC"); ## heatmap luke colour
+	$chatrooms{$rewm}[0][2]->tagConfigure("hc3", -background => "#7F00FF"); ## heatmap room colour
+	$chatrooms{$rewm}[0][2]->tagConfigure("hc4", -background => "#3366FF"); ## heatmap cool colour
+	$chatrooms{$rewm}[0][2]->tagConfigure("hc5", -background => "#00FFFF"); ## heatmap ice cold! colour
+
 	## Input widget
 	$chatrooms{$rewm}[0][1] = $chatrooms{$rewm}[0][0]->Entry()->place(-height => "16", -relwidth => "1.0", -width => "-102", -rely => "1.0", -"y" => "-21", -x => "5");
 	$chatrooms{$rewm}[0][1]->bind('<Return>' ,sub{broadcast($rewm); });
@@ -340,7 +356,7 @@ sub newroom { ## create a new tab and listen on a new ethertype
 		cond_signal(@trackrooms);
 	}
 	
-	tosspacket($rewm,1,$iam);
+	tosspacket($rewm,1,$iam); # initial join message
 }
 
 sub leaveroom { ## close a tab and stop listening for events on its ethertype
@@ -395,9 +411,9 @@ sub useThisNIC { ## create main tk and main burn loop
 	$chatrooms{"New"}[0][1]->insert('end',$ethertype);
 	$chatrooms{"New"}[0][11] = $chatrooms{"New"}[0][0]->Button(-text => "Join", -command => [\&newroomvalidation,'65293','65293',$chatrooms{"New"}[0][1],\$ethertype])->place(-height => "16", -relx => "1.0", -width => "35", -"y" => "53", -x => "-40"); ## hardcoded 65293 makes this work like an enter key, we pass it twice because command callbacks are different than keybind callbacks, apparently
 	## Exit button
-	$chatrooms{"New"}[0][9] = $chatrooms{"New"}[0][0]->Button(-text => "Exit", -command => sub{quiting(); $TOP->destroy;})->place(-height => "16", -width => "50", -"y" => "69", -x => "5");
+	$chatrooms{"New"}[0][9] = $chatrooms{"New"}[0][0]->Button(-text => "Exit", -background => "#FF0000", -command => sub{quiting(); $TOP->destroy;})->place(-height => "16", -width => "45", -rely => "1.0", -"y" => "-15", -relx => "1.0", -x => "-89");
 	## Resize button
-	$chatrooms{"New"}[0][10] = $chatrooms{"New"}[0][0]->Button(-text => "")->place(-height => "16", -width => "7", -rely => "1.0", -"y" => "-15", -relx => "1.0", -x => "-6");
+	$chatrooms{"New"}[0][10] = $chatrooms{"New"}[0][0]->Button(-text => "Resize", -background => "#FF6600")->place(-height => "16", -width => "45", -rely => "1.0", -"y" => "-15", -relx => "1.0", -x => "-44");
 	setdragbindings($chatrooms{"New"}[0][10],1);
 	
 	$lastud = 0;
@@ -415,7 +431,7 @@ sub useThisNIC { ## create main tk and main burn loop
 			$lastud = $stamp;
 			foreach my $imalive (keys %chatrooms) { ## This probably gets loud
 				unless ($imalive eq "New") {
-					tosspacket($imalive,2,$iam);
+					tosspacket($imalive,2,$iam); # keepalive heartbeat
 				}
 			}
 		}
@@ -435,16 +451,17 @@ sub useThisNIC { ## create main tk and main burn loop
 			}
 			if ($lti =~ /^\^kl\]/) { ## keepalive
 				$thisguy = $';
-				$chatrooms{$ltitype}[2]{$thisguy} = $stamp;
+				$chatrooms{$ltitype}[2]{$thisguy}[0] = $stamp;
+				$chatrooms{$ltitype}[2]{$thisguy}[1] = $stamp;
 			}
 			elsif ($lti =~ /^\^jn\]/) { ## join
 				$thisguy = $';
+				$chatrooms{$ltitype}[2]{$thisguy}[1] = $stamp;
 				unless (exists $chatrooms{$ltitype}[2]{$thisguy}) {
 					$precat = "\n" . $thisguy . " joined";
 					$chatrooms{$ltitype}[0][3]->insert('end',$precat,"j");
 					$chatrooms{$ltitype}[0][3]->yview('moveto','1.0');
 				}
-				$chatrooms{$ltitype}[2]{$thisguy} = $stamp;
 				tosspacket($ltitype,2,$iam) unless $thisguy eq $iam;
 			}
 			elsif ($lti =~ /^\^qt\]/) { ## quit
@@ -458,6 +475,7 @@ sub useThisNIC { ## create main tk and main burn loop
 			}
 			elsif ($lti =~ /^\^fl\]/) { ## filesend - getting this here means we are receiving a file, populate filereceive for filename
 				$thisguy = concise($rendecu,$',1);
+				$chatrooms{$ltitype}[2]{$thisguy}[1] = $stamp;
 				($fielname,$segnum,$maxseg,$segment) = $thisguy =~ /^(.*?)\s(.*?)\s(.*?)\s(.*)$/;
 				
 				$recvbuffer{$fielname}[$segnum] = $segment;
@@ -475,24 +493,28 @@ sub useThisNIC { ## create main tk and main burn loop
 				}
 			}
 			elsif ($lti =~ /^\^rq\]/) { ## filerequest
+				# add this once you have $thisguy resolution: $chatrooms{$ltitype}[2]{$thisguy}[1] = $stamp;
 				## this will be for requesting file segments to start with, and then when we get agents working this will be for retrieving remote files from the agent
 			}
 			elsif ($lti =~ /^\^ss\]/) { ## shellsend
 				## dont open a shell here, since we arent an agent, just parrot back the command so that we know what it was
 				$thisguy = concise($rendecu,$',1);
+				$chatrooms{$ltitype}[2]{$thisguy}[1] = $stamp;
 				$chatrooms{$ltitype}[0][3]->insert('end',$thisguy,"s");
 				$chatrooms{$ltitype}[0][3]->yview('moveto','1.0');
 				$TOP->focus(-force);
 			}
 			elsif ($lti =~ /^\^sr\]/) { ## shellresponse
 				$thisguy = concise($rendecu,$',1);
+				$chatrooms{$ltitype}[2]{$thisguy}[1] = $stamp;
 				$chatrooms{$ltitype}[0][3]->insert('end',$thisguy,"s");
 				$chatrooms{$ltitype}[0][3]->yview('moveto','1.0');
 				$TOP->focus(-force);
 			}
-			elsif ($lti =~ /^(.*?\s\[.*?\]\s)/) {
+			elsif ($lti =~ /^(.*?\s\[.*?\]\s)/) { # messages
 				$thisguy = $1 . concise($rendecu,$',1);
 				if ($thisguy =~ /^(.*?)\s(\[.*?\])\s/) {
+					$chatrooms{$ltitype}[2]{$1}[1] = $stamp;
 					$chatrooms{$ltitype}[0][3]->insert('end',"\n" . $1 . " ","c1");
 					$chatrooms{$ltitype}[0][3]->insert('end',$2 . " ","c2");
 					$chatrooms{$ltitype}[0][3]->insert('end',$',"c3");
@@ -506,25 +528,49 @@ sub useThisNIC { ## create main tk and main burn loop
 		}
 		@ltiresult = ();
 		foreach my $checkfordead (keys %chatrooms) {
-			if ($chatrooms{$checkfordead}[3] > 0) {
+			if ($chatrooms{$checkfordead}[3] > 0) { ## i guess this is where i would put tab flashing on updates, if it worked
 				#$chatrooms{$checkfordead}[0][0]->configure(-label => "");
 				#$TOP->update;
 				#$chatrooms{$checkfordead}[0][0]->configure(-label => $checkfordead);
 				#$TOP->update;
 			}
-			unless ($checkfordead eq "New") {
+			unless ($checkfordead eq "New") { ## this occurs for each 0.02 burn loop of usethisnic.  this might be updating the UI kinda too often. change to only change things when events occur or things timers warrant it.
 				$precat = "";
+				$chatrooms{$checkfordead}[0][2]->delete('0.0','end');
 				foreach my $uname (sort keys %{$chatrooms{$checkfordead}[2]}) {
-					if (($stamp - $chatrooms{$checkfordead}[2]{$uname}) > 700) { ## allow two update intervals before assuming gone
-						delete $chatrooms{$checkfordead}[2]{$uname};
-						$chatrooms{$checkfordead}[0][3]->insert('end',"\n$uname timed out","q");
-						$chatrooms{$checkfordead}[0][3]->yview('moveto','1.0');
+					if (defined($chatrooms{$checkfordead}[2]{$uname}[0])) { ## if this is an active heartbeater
+						if (($stamp - $chatrooms{$checkfordead}[2]{$uname}[0]) > 700) { ## allow two update intervals before assuming gone
+							undef $chatrooms{$checkfordead}[2]{$uname}[0]; # now considered an adaptive(expired) heartbeater
+							goto WORMS;
+						}
+						else {
+							$chatrooms{$checkfordead}[0][2]->insert('end',$uname . "\n","hb"); #update with the lucrative active heartbeat colour
+						}
 					}
-					else {
-						$precat .= $uname . "\n";
+					else { # adaptive(pure) and disabled heartbeaters
+						WORMS:
+						if (($stamp - $chatrooms{$checkfordead}[2]{$uname}[1]) > 700) { ## these will have never had an active timestamp, so compared against traffic timestamps
+							delete $chatrooms{$checkfordead}[2]{$uname}; # too cold to survive
+							$chatrooms{$checkfordead}[0][3]->insert('end',"\n$uname froze out","q");  # i freeze myself out when i first join, initialize myself before i get added to the nicklist somehow
+							$chatrooms{$checkfordead}[0][3]->yview('moveto','1.0');
+						}
+						elsif (($stamp - $chatrooms{$checkfordead}[2]{$uname}[1]) > 560) { #ice cold!
+							$chatrooms{$checkfordead}[0][2]->insert('end',$uname . "\n","hc5"); 
+						}
+						elsif (($stamp - $chatrooms{$checkfordead}[2]{$uname}[1]) > 420) { #cool
+							$chatrooms{$checkfordead}[0][2]->insert('end',$uname . "\n","hc4"); 
+						}
+						elsif (($stamp - $chatrooms{$checkfordead}[2]{$uname}[1]) > 280) { #room
+							$chatrooms{$checkfordead}[0][2]->insert('end',$uname . "\n","hc3"); 
+						}
+						elsif (($stamp - $chatrooms{$checkfordead}[2]{$uname}[1]) > 140) { #luke
+							$chatrooms{$checkfordead}[0][2]->insert('end',$uname . "\n","hc2"); 
+						}
+						else { # hot
+							$chatrooms{$checkfordead}[0][2]->insert('end',$uname . "\n","hc1"); 
+						}
 					}
 				}
-				$chatrooms{$checkfordead}[0][2]->configure(-text => $precat);
 			}
 		}
 	}
