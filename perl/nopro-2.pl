@@ -11,7 +11,7 @@
 
 ## DATA STRUCTURE:
 ## %chatrooms{$ethertype}[
-##				widgets (0) [tab(0),entry(1),label(2),scrolled(3),close(4),resize(5)] OR [tab(0),etype(1),letype(2),lnick(3),nick(4),ltrip(5),trip(6),lkey(7),key(8),exit(9),resize(10)] for New tab
+##				widgets (0) [tab(0),entry(1),label(2),scrolled(3),close(4),resize(5)] OR [tab(0),etype(1),letype(2),lnick(3),nick(4),ltrip(5),trip(6),lkey(7),key(8),exit(9),resize(10), joinbutton(11), heartbeat(12,13,14,15), chatoptions(16,17,18)] for New tab
 ##				messages (1) [messageindex][handle,tripcode,message]
 ##				userlist (2) {username => [lastactiveheartbeattimestamp,lastpackettimestamp]}
 ##				updatepending (3)
@@ -35,15 +35,15 @@
 	#then cat buffer together and dump to file
 	#field for file name
 	#progress bar? progress blocks?
-## 14. Add option to surpress keepalives, joins, and parts to keep them from getting too loud on the wire
+## 14. DONE: Add option to surpress keepalives, joins, and parts to keep them from getting too loud on the wire
 ## 16. RARP detection for your source mac, then dynamic mac reallocation.  Similar detection of mac scanners.  Perhaps jump to legit OUIs at http://standards.ieee.org/regauth/oui/index.shtml
 ## 17. PARTIAL, MORE OPTIONS PENDING: Move options to New Room tab
 ## 20. Add option to toggle between setting MAC addresses statically, random for every packet, or changes after detection
-## 21. Timestamp option for messages
+## 21. DONE, also added tripcode suppression: Timestamp option for messages
 ## 22. On quit, signal child threads so that they might close cleanly.
-## 23. Nicklist colouring to see who has active heartbeat, heatmap for those who dont heartbeat, 700 seconds until ice cold to allow for two heartbeat intervals.
-## 24. User messages, joins, etc used as heartbeats to limit actual heartbeats required.  Only send heartbeat if you've been idle on the wire.  Active heartbeat won't be necessary if you never idle, otherwise you get an active heartbeat nick.
-## 25. So three heartbeat modes, Active, Adaptive, Disabled.
+## 23. DONE: Nicklist colouring to see who has active heartbeat, heatmap for those who dont heartbeat, 700 seconds until ice cold to allow for two heartbeat intervals.
+## 24. DONE: User messages, joins, etc used as heartbeats to limit actual heartbeats required.  Only send heartbeat if you've been idle on the wire.  Active heartbeat won't be necessary if you never idle, otherwise you get an active heartbeat nick.
+## 25. DONE: So three heartbeat modes, Active, Adaptive, Disabled.
 ## 26. User define the heartbeat timings in the UI i guess, if users like that sort of thing and don't want colours changing so often.
 
 ## INSTALLING DEPENDANCIES:
@@ -60,13 +60,13 @@
 ## ppm install Tk
 
 ## BORKED
-## 3. Perhaps track and transmit your own keepalives for each tab independantly
-## 8. Normalize handle justification in nicklist
+## 3. DONE, could use a test or two - Perhaps track and transmit your own keepalives for each tab independantly
+## 8. DONE: Normalize handle justification in nicklist
 ## 10. FIXED: Make it more obvious that enter is bound to create tab in New tab etype widget
-## 11. Choosing an interface using tabtabtabenter doesing work like clicking it does, the new widgets exist and accept input, but the frame doesnt refresh
-## 12. Make resize and exit controls nicer
+## 11. Choosing an interface using tabtabtabenter doesnt work like clicking it does, the new widgets exist and accept input, but the frame doesnt refresh
+## 12. DONE: Make resize and exit controls nicer
 ## 13. There is no taskbar icon in overrideredirect mode, and therefore it does not flash
-## 14. Keepalive isnt, you know, keeping alive.
+## 14. PARTIAL, test with other people - Keepalive isnt, you know, keeping alive.
 ## 15. PARTIAL - FIX TURNS OFF WINDOW FLASHING, WHICH WAS BROKEN ANYWAYS.  FIX ALL THAT THEN THIS IS FIXED: Entry widgets aren't regaining focus after a message is submitted
 ## 16. FIXED - Get rid of internal padding so that you can put button elements right up next to the border inside of note book frames, then maybe replace them with bitmaps of arrows for resizing or something
 ## 17. Find mouseover background colours for buttons and customize them.
@@ -120,6 +120,9 @@ our $nb;
 our $rendecu = "allcalma";
 our $tcode = "";
 our $active = "New";
+our $heartbeat = 2;
+our $showtimestamp = 0;
+our $showtripcode = 1;
 
 $|++;
 
@@ -355,7 +358,6 @@ sub newroom { ## create a new tab and listen on a new ethertype
 		push @trackrooms, "+" . $rewm; ## Omit the + sign for leaving a room
 		cond_signal(@trackrooms);
 	}
-	
 	tosspacket($rewm,1,$iam); # initial join message
 }
 
@@ -410,13 +412,20 @@ sub useThisNIC { ## create main tk and main burn loop
 	$chatrooms{"New"}[0][1]->bind('<Key>' => [\&newroomvalidation,Ev('N'),$chatrooms{"New"}[0][1],\$ethertype]);
 	$chatrooms{"New"}[0][1]->insert('end',$ethertype);
 	$chatrooms{"New"}[0][11] = $chatrooms{"New"}[0][0]->Button(-text => "Join", -command => [\&newroomvalidation,'65293','65293',$chatrooms{"New"}[0][1],\$ethertype])->place(-height => "16", -relx => "1.0", -width => "35", -"y" => "53", -x => "-40"); ## hardcoded 65293 makes this work like an enter key, we pass it twice because command callbacks are different than keybind callbacks, apparently
+	## Heartbeat checkbutton
+	$chatrooms{"New"}[0][12] = $chatrooms{"New"}[0][0]->Label(-anchor => 'w', -text => "Heartbeat")->place(-height => "16", -width => "95", -"y" => "76", -x => "5");
+	$chatrooms{"New"}[0][13] = $chatrooms{"New"}[0][0]->Radiobutton(-anchor => 'w', -value => "2", -variable => \$heartbeat, -text => "Active")->place(-height => "16", -width => "95", -"y" => "92", -x => "5");
+	$chatrooms{"New"}[0][14] = $chatrooms{"New"}[0][0]->Radiobutton(-anchor => 'w', -value => "1", -variable => \$heartbeat, -text => "Adaptive")->place(-height => "16", -width => "95", -"y" => "108", -x => "5");
+	$chatrooms{"New"}[0][15] = $chatrooms{"New"}[0][0]->Radiobutton(-anchor => 'w', -value => "0", -variable => \$heartbeat, -text => "Disabled")->place(-height => "16", -width => "95", -"y" => "124", -x => "5");
+	## Chat options
+	$chatrooms{"New"}[0][16] = $chatrooms{"New"}[0][0]->Label(-anchor => 'w', -text => "Chat Options")->place(-height => "16", -width => "115", -"y" => "76", -x => "100");
+	$chatrooms{"New"}[0][17] = $chatrooms{"New"}[0][0]->Checkbutton(-anchor => 'w', -variable => \$showtimestamp, -text => "Show Timestamps")->place(-height => "16", -width => "115", -"y" => "92", -x => "100");
+	$chatrooms{"New"}[0][18] = $chatrooms{"New"}[0][0]->Checkbutton(-anchor => 'w', -variable => \$showtripcode, -text => "Show Tripcodes")->place(-height => "16", -width => "115", -"y" => "108", -x => "100");
 	## Exit button
 	$chatrooms{"New"}[0][9] = $chatrooms{"New"}[0][0]->Button(-text => "Exit", -background => "#FF0000", -command => sub{quiting(); $TOP->destroy;})->place(-height => "16", -width => "45", -rely => "1.0", -"y" => "-15", -relx => "1.0", -x => "-89");
 	## Resize button
 	$chatrooms{"New"}[0][10] = $chatrooms{"New"}[0][0]->Button(-text => "Resize", -background => "#FF6600")->place(-height => "16", -width => "45", -rely => "1.0", -"y" => "-15", -relx => "1.0", -x => "-44");
 	setdragbindings($chatrooms{"New"}[0][10],1);
-	
-	$lastud = 0;
 
 	$nb->configure(-bd => 1, -background => "#303090", -foreground => "#FF00FF", -inactivebackground => "#E0E0E0");
 		
@@ -427,14 +436,6 @@ sub useThisNIC { ## create main tk and main burn loop
 		$TOP->update();
 		($sec,$min,$hora,$diem,undef,undef) = localtime(time);
 		$stamp = ($diem * 86400) + ($hora * 3600) + ($min * 60) + $sec;
-		if (($stamp - $lastud) > 300) {
-			$lastud = $stamp;
-			foreach my $imalive (keys %chatrooms) { ## This probably gets loud
-				unless ($imalive eq "New") {
-					tosspacket($imalive,2,$iam); # keepalive heartbeat
-				}
-			}
-		}
 		{
 			lock @tiresult;
 			foreach (@tiresult) {
@@ -461,8 +462,13 @@ sub useThisNIC { ## create main tk and main burn loop
 					$precat = "\n" . $thisguy . " joined";
 					$chatrooms{$ltitype}[0][3]->insert('end',$precat,"j");
 					$chatrooms{$ltitype}[0][3]->yview('moveto','1.0');
+					if ($heartbeat == "2") { ## active heartbeat, so we send heartbeat so this guy knows we're here
+						tosspacket($ltitype,2,$iam) unless $thisguy eq $iam;
+					}
+					elsif ($heartbeat == "1") { ## adaptive heartbeat, so we send a join instead. this _shouldnt_ spam because it checks for exists
+						tosspacket($ltitype,1,$iam) unless $thisguy eq $iam;
+					}
 				}
-				tosspacket($ltitype,2,$iam) unless $thisguy eq $iam;
 			}
 			elsif ($lti =~ /^\^qt\]/) { ## quit
 				$thisguy = $';
@@ -515,9 +521,11 @@ sub useThisNIC { ## create main tk and main burn loop
 				$thisguy = $1 . concise($rendecu,$',1);
 				if ($thisguy =~ /^(.*?)\s(\[.*?\])\s/) {
 					$chatrooms{$ltitype}[2]{$1}[1] = $stamp;
-					$chatrooms{$ltitype}[0][3]->insert('end',"\n" . $1 . " ","c1");
-					$chatrooms{$ltitype}[0][3]->insert('end',$2 . " ","c2");
-					$chatrooms{$ltitype}[0][3]->insert('end',$',"c3");
+					$chatrooms{$ltitype}[0][3]->insert('end',"\n");
+					$chatrooms{$ltitype}[0][3]->insert('end',$hora . ":" . sprintf("%02d",$min) . ":" . sprintf("%02d",$sec) . " ","j") if $showtimestamp; # timestamp
+					$chatrooms{$ltitype}[0][3]->insert('end',$1 . " ","c1"); # name
+					$chatrooms{$ltitype}[0][3]->insert('end',$2 . " ","c2") if $showtripcode; # tripcode
+					$chatrooms{$ltitype}[0][3]->insert('end',$',"c3"); # text
 					$chatrooms{$ltitype}[0][3]->yview('moveto','1.0');
 					##$TOP->focus(-force); # this fucks with entry widgets regaining focus after you type a message, move this outside just message events anyways
 					unless ($ltitype eq $active) {
@@ -570,6 +578,23 @@ sub useThisNIC { ## create main tk and main burn loop
 							$chatrooms{$checkfordead}[0][2]->insert('end',$uname . "\n","hc1"); 
 						}
 					}
+					if ($uname eq $iam) { ## hey, it's me!
+						if (defined($chatrooms{$checkfordead}[2]{$uname}[0])) { # my heartbeat on record
+							if (($stamp - $chatrooms{$checkfordead}[2]{$uname}[0]) > 300) {
+								tosspacket($checkfordead,2,$iam); ## active needs heartbeat, adaptive clears timestamps and wont get here unless you've idled for 5
+							}
+						}
+						else { # no heartbeat on record
+							if ($heartbeat == "2") {
+								tosspacket($checkfordead,2,$iam);
+							}
+							elsif ($heartbeat == "1") {
+								if (($stamp - $chatrooms{$checkfordead}[2]{$uname}[1]) > 300) { # we've done no actions in 5 minutes
+									tosspacket($checkfordead,2,$iam);
+								}
+							}
+						}
+					}
 				}
 			}
 		}
@@ -605,6 +630,16 @@ sub sendfiel { ## Send a file over the network
 sub tosspacket { ## crafts packets
 	## Message \b00, Join \b01, Keepalive \b10, Quit \b11
 	my ($tptype,$ptype,$payload) = @_; ## ethertype, opcode, payload
+	if ($heartbeat == "0") { ## disabled heartbeat mode doesnt send joins, quits, or keepalives
+		if ($ptype == "1" || $ptype == "2" || $ptype == "3") {
+			return;
+		}
+	}
+	if ($heartbeat == "1") { ## adaptive, any traffic negates the need for a heartbeat for now
+		if (defined($chatrooms{$tptype}[2]{$iam}[0])) {
+			delete $chatrooms{$tptype}[2]{$iam}[0];
+		}
+	}
 	## manual binary generation, to keep automatic zero padding from occuring	
 	$bptype = unpack('B8',$ptype);
 	(undef,$aptype) = unpack('a5a3', $bptype); ## grab just three bits of data for packet type, i'm not sure this is working either. apparently i'm bad at decimal to binary
