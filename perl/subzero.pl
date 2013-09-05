@@ -20,6 +20,7 @@ our $timestamp = 0;
 our $datatoo = 0;
 my $useadapter = 0;
 our $regex = "";
+our $filter = "";
 our $dumphex = 0;
 
 $nocolour = "1;30";
@@ -33,6 +34,7 @@ GetOptions(
 	"t" => \$timestamp,
 	"i=i" => \$useadapter,
 	"r=s"   => \$regex,
+	"f=s"   => \$filter,
 	"x"   => \$dumphex
 	);
 # add option for payload highlighting without payload filtering
@@ -40,6 +42,7 @@ if ($halp > 0) {
 	print "-a\tANSI color output\n";
 	print "-d\tShow payloads\n";
 	print "-e\tSupresses common ethertypes:\n\tInternet Protocol Version 4 (0800)\n\tPer-VLAN Spanning Tree Plus (0032 usually)\n\tInternet Protocol Version 6 (86DD)\n\tEthernet Configuration Testing Protocol (9000)\n\tAddress Resolution Protocl (0806)\n\tLink Layer Discovery Protocol (88CC)\n\tCisco Discovery Protocol (006F usually)\n\tEAP over LAN (888E)\n";
+	print "-f [s]\tFilter by IPv4\n";
 	print "-h\tThis cruft\n";
 	print "-i [n]\tAdapter number\n";
 	print "-r [s]\tRegex filter and payload highlighting\n";
@@ -158,23 +161,26 @@ sub printPackets { ## Parses packets into human readable, crafts response based 
 		$i += 4; ## skip over ethertype for payload printing
 		$vlan .= "Priority Code Point: " . parsehdra($pcp) . " Drop Eligible Indicator: " . parsehdra($dei) . " VLAN Identifier: " . parsehdra($vid) . "\n";
 	}
-
-	if($etherall eq "0800") {
+	unless ($etherall eq "0800") {
+		return if $filter ne "";
+	}
+	if ($etherall eq "0800") {
 		return if $suppress0800 > 0;
 	}
-	if($etherall eq "0800" || $etherall eq "0032" || $etherall eq "86DD" || $etherall eq "9000" || $etherall eq "0806" || $etherall eq "88CC" || $etherall eq "006F" || $etherall eq "888E") { 
+	if ($etherall eq "0800" || $etherall eq "0032" || $etherall eq "86DD" || $etherall eq "9000" || $etherall eq "0806" || $etherall eq "88CC" || $etherall eq "006F" || $etherall eq "888E") { 
 		return if $suppressetype > 0;
 	}
 	unless ($data =~ /$regex/i) {
 		return;
 	}
-	print thetime() . ap($nocolour) . "MAC SRC:" . ap("1;32") . $macaddysrc . ap($nocolour) . " MAC DEST:" . ap("1;31") . $macaddydest . ap(0) . "\n";
+	#add in delayed print here to provide for IP filtering later, wihth;
+	#print thetime() . ap($nocolour) . "MAC SRC:" . ap("1;32") . $macaddysrc . ap($nocolour) . " MAC DEST:" . ap("1;31") . $macaddydest . ap(0) . "\n";
 	print $vlan;
 	if (hex($etherall) < 0x05dc) { ## I'm still not 100% certain this is working as intended, but it seems to work
-		print ap($nocolour) . "Network Layer Protocol: " . ap("1;35") . $etherall . " IEEE802.3 LLC SAP Frame" . ap(0) . "\n";
+		#print ap($nocolour) . "Network Layer Protocol: " . ap("1;35") . $etherall . " IEEE802.3 LLC SAP Frame" . ap(0) . "\n";
 	}
 	else {
-		print ap($nocolour) . "Network Layer Protocol: " . ap("1;35") . ethertype($etherall) . ap(0) . "\n";
+		#print ap($nocolour) . "Network Layer Protocol: " . ap("1;35") . ethertype($etherall) . ap(0) . "\n";
 	}
 	## add recursive vlan checks here, with goto to circle back to the underlying protocols
 	if($etherall eq "0800") { ## DIX Ethernet II frame
@@ -185,6 +191,11 @@ sub printPackets { ## Parses packets into human readable, crafts response based 
 			my ($hdrihl,$hdrtosprec,$hdrtosdel,$hdrtostru,$hdrtosrel,$hdrtosmon,$hdrtosres,$hdrtlen,$hdrid,$hdrresf,$hdrdf,$hdrmf,$hdrfrg,$hdrttl,$hdrpro,$hdrchk,$sclassa,$sclassb,$sclassc,$sclassd,$dclassa,$dclassb,$dclassc,$dclassd) = unpack 'a4a3aaaaaa16a16aaaa13a8a8a16a8a8a8a8a8a8a8a8', substr $xdrstr, 4;
 			$srcaddress = (parsehdra($sclassa) . "." . parsehdra($sclassb) . "." .  parsehdra($sclassc) . "." . parsehdra($sclassd));
 			$dstaddress = (parsehdra($dclassa) . "." . parsehdra($dclassb) . "." . parsehdra($dclassc) . "." . parsehdra($dclassd));
+			if ($filter ne "") {
+				unless ($filter eq $srcaddress || $filter eq $dstaddress) {
+					return;
+				}
+			}
 			$stathash{"Proto"}{datapro(parsehdra($hdrpro))}++;
 			print ap($nocolour), "IPV: ", ap("1;37"), parsehdra($hdripv), " ", dataipv(parsehdra($hdripv)), ap($nocolour), " IHL: ", ap("1;37"), parsehdra($hdrihl), ap($nocolour), " ID: ", ap("1;37"), parsehdra($hdrid), ap($nocolour), " DF: ", ap("1;37"), $hdrdf, ap($nocolour), " MF: ", ap("1;37"), $hdrmf, ap($nocolour), " TTL: " , ap("1;37"), parsehdra($hdrttl), ap($nocolour), " Protocol: " , ap("1;37"), parsehdra($hdrpro), " ", datapro(parsehdra($hdrpro)), ap(0), "\n";
 			printf ap($nocolour) . "%-13s" . ap("0;32") . "%-15s" . ap($nocolour) . "%-16s" . ap("0;31") . "%-15s" . ap(0) . "\n", "Src Address: ", $srcaddress , "  Dest Address: ", $dstaddress;

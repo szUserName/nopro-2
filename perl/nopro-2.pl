@@ -68,6 +68,8 @@
 ## 18. Change individual tab colours for when a channel had an update
 ## 19. Change nicklist to a scrolled (osoe)
 ## 20. DONE: Fixed a minor race condition where you could delete a room while the burn loop was still processing its values in the data structure
+## 21. Make sure we limit data sent for shell responses if we get more than 5000 or so bytes of data
+## 22. When someone freezes out, it freezefloods the channel.  This was after i went from active to disabled, if that matters.
 
 #perl2exe_include "attributes.pm"
 #perl2exe_include "Tk/Photo.pm"
@@ -265,7 +267,7 @@ sub concise { ## cipher block chainer for enc/dec
 		$tempcipher =~ s/\0//g;
 	}
 	else {
-		$tempcipher = encode_base64($tempcipher);
+		$tempcipher = encode_base64($tempcipher, ""); ## default is \n line separator between each 76 bytes, specify empty string to fix this
 		chomp($tempcipher);
 		$tempcipher =~ s/=//g;
 	}
@@ -548,7 +550,7 @@ sub useThisNIC { ## create main tk and main burn loop
 				#$chatrooms{$checkfordead}[0][0]->configure(-label => $checkfordead);
 				#$TOP->update;
 			}
-			unless ($checkfordead eq "New") { ## this occurs for each 0.02 burn loop of usethisnic.  this might be updating the UI kinda too often. change to only change things when events occur or things timers warrant it.
+			unless ($checkfordead eq "New") { ## this occurs for each 0.02 burn loop of usethisnic.  this might be updating the UI kinda too often. change to only change things when events occur or when timers warrant it.
 				$precat = "";
 				$chatrooms{$checkfordead}[0][2]->delete('0.0','end');
 				foreach my $uname (sort keys %{$chatrooms{$checkfordead}[2]}) {
@@ -563,8 +565,10 @@ sub useThisNIC { ## create main tk and main burn loop
 					}
 					else { # adaptive(pure) and disabled heartbeaters
 						WORMS:
+						
 						if (($stamp - $chatrooms{$checkfordead}[2]{$uname}[1]) > 700) { ## these will have never had an active timestamp, so compared against traffic timestamps
-							delete $chatrooms{$checkfordead}[2]{$uname}; # too cold to survive
+							$counter = 0;
+							delete ${$chatrooms{$checkfordead}[2]}{$uname}; # too cold to survive <- what happens if this is me? do i delete myself if i'm disabled mode?
 							$chatrooms{$checkfordead}[0][3]->insert('end',"\n$uname froze out","q");  # i freeze myself out when i first join, initialize myself before i get added to the nicklist somehow
 							$chatrooms{$checkfordead}[0][3]->yview('moveto','1.0');
 						}
@@ -584,19 +588,19 @@ sub useThisNIC { ## create main tk and main burn loop
 							$chatrooms{$checkfordead}[0][2]->insert('end',$uname . "\n","hc1"); 
 						}
 					}
-					if ($uname eq $iam) { ## hey, it's me!
+					if ($uname eq $iam && defined($chatrooms{$checkfordead}[2]{$uname})) { ## hey, it's me!  (heartbeats are 0 disabled, 1 adaptive, and 2 active)
 						if (defined($chatrooms{$checkfordead}[2]{$uname}[0])) { # my heartbeat on record
 							if (($stamp - $chatrooms{$checkfordead}[2]{$uname}[0]) > 300) {
 								tosspacket($checkfordead,2,$iam); ## active needs heartbeat, adaptive clears timestamps and wont get here unless you've idled for 5
 							}
 						}
 						else { # no heartbeat on record
-							if ($chatrooms{$checkfordead}[4][0] == "2") {
+							if ($chatrooms{$checkfordead}[4][0] == "2") { ## if active heartbeat
 								tosspacket($checkfordead,2,$iam);
 							}
-							elsif ($chatrooms{$checkfordead}[4][0] == "1") {
-								if (($stamp - $chatrooms{$checkfordead}[2]{$uname}[1]) > 300) { # we've done no actions in 5 minutes
-									tosspacket($checkfordead,2,$iam);
+							elsif ($chatrooms{$checkfordead}[4][0] == "1") { ## if adaptive heartbeat
+								if (($stamp - $chatrooms{$checkfordead}[2]{$uname}[1]) > 300) { # we've done no actions in 5 minutes, we check if define earlier, because i think checking this timestamp makes the uname exist again after it's froze out
+									tosspacket($checkfordead,2,$iam); ## force an active heartbeat
 								}
 							}
 						}
@@ -662,20 +666,21 @@ sub tosspacket { ## crafts packets
 	my $soy = Win32::NetPacket->new(adapter_name => $dnic) or die $@;
 	
 	$sourcemac = "";
-	for ($octet = 0; $octet < 6; $octet++) {
+	for ($octet = 0; $octet < 6; $octet++) { # generate our source mac address
 		$toctet = int(rand(256));
-		if ($octet == 0) {
+		if ($octet == 0) { # for the first octet of the source mac
 			$toctet = $toctet >> 2;
 			$toctet = $toctet << 2;
 			## this keeps the most significant bit (since we are network byte order, and therefore big-endian)
-			## of the first octet a multiple of four, to look like a legitmate manufactureer OUI.
+			## of the first octet a multiple of four (by zeroing the one and two bit), to look like a legitmate manufacturer OUI.
 			## With any even source MAC address, the radius authenticator sends 802.1x EAP Request Identity to try to identify me.
 			## With odd source MACs it does not, but those PROBABLY do not get forwarded by the switch,
 			## since responding would cause the destination device to inadvertantly broadcast, 
 			## which is usually not a desirable trait.  You could set your MAC to a MAC you sniff off the wire
-			## to perhaps evade port security for some while, though it may corrupt ARP tables.  The radius authenticator
-			## seems content to ping me for EAP Identity requests on mod 4=2 source MAC addresses, which also supports
-			## the idea that broad/multicast source MAC addresses aren't being relayed to it.
+			## to perhaps evade port security for some while, though it _may_ corrupt ARP tables for some values of ARP, I expect.
+			## The radius authenticator seems content to ping me for EAP Identity requests on mod 4=2 source MAC OUIs, which
+			## also supports the idea that broad/multicast source MAC addresses aren't being relayed to it, since mod 2=1 OUIs are
+			## generally considered broad/multi, and mod 4=2 OUIs are unicast and therefore legit but non-standard and therefore suspect.
 			## EAP Identity Request Timeout defaults to 1 second IOS 4.1 and older. and 30 seconds on IOS 4.2 and newer
 			## EAP Identify Request Max Retries default to 2, Recommened set to 12.  Removes supplicant entry from MSCB (Mobile Station Control Block)
 			## (which should keep me from sending any packets) and the WLC (Wireless LAN Controller) (does this apply only to wireless?)
@@ -687,6 +692,7 @@ sub tosspacket { ## crafts packets
 	#$sourcemac = "\x00\xAA\xBB\xCC\xDD\xEE";  ## uncomment if you're into hardcoding
 	$soyeah =  "\xFF\xFF\xFF\xFF\xFF\xFF" . $sourcemac . pack("H*",$tptype) . pack('B*',$aptype . $pa . $bp); ## pack two bits of ptype, eleven bits of size, payload in mults of 8, and two random bits.  This keeps ascii from being displayed overtly on sniffers without having to add another encryption layer
 	## TO ADD: If ^^ are odd bits, this will be treated as a multicast MAC address and SHOULD be broadcasted as well, since many devices don't distinguish between broadcast and multicast.  Might be useful for extra evasion.
+	## Note: I think my interface or some switch is adding nulls to make my packets a good length, so we account for this in printpackets.
 	$soy->SendPacket($soyeah);
 }
 
