@@ -6,31 +6,52 @@
 #include "stdio.h"
 #include "stdlib.h"
 #include "winsock2.h"   //need winsock for inet_ntoa and ntohs methods
- 
 #define HAVE_REMOTE
 #include "pcap.h"   //Winpcap :)
- 
 #pragma comment(lib , "ws2_32.lib") //For winsock
 #pragma comment(lib , "wpcap.lib") //For winpcap
-
-// gcc silvermoon.c -o silvermoon.exe -lws2_32 -lwpcap
-
-//some packet processing functions
-
-void ProcessPacket (u_char* , int); //This will decide how to digest
- 
-void print_ethernet_header (u_char*);
-void PrintData (u_char* , int);
- 
-// Set the packing to a 1 byte boundary
-//#include "pshpack1.h"
-
-
 #define B64_DEF_LINE_SIZE   72
 #define B64_MIN_LINE_SIZE    4
-
+#define N               16
+// gcc silvermoon.c -o silvermoon.exe -lws2_32 -lwpcap
+void ProcessPacket (u_char* , int);
+void print_ethernet_header (u_char*);
+void PrintData (u_char* , int);
+unsigned char FinalPacket[5000];
+pcap_t *fp;
+void shift_right(unsigned char *ar, int size, int shift) { // I stole this from the internets.  pass it message, messagelen, and # of bits to shift
+    while (shift--) {                           // For each bit to shift ... <--- is this slower than doing one pass with a larger bitwise shift?
+	int carry = 0;                              // Clear the initial carry bit.	//int i = size - 1;
+	int i = 0;
+	for (; i < size; ++i) {
+            int next = (ar[i] & 1) ? 0x80 : 0;  // ... if the low bit is set, set the carry bit.
+            ar[i] = carry | (ar[i] >> 1);       // Shift the element one bit left and addthe old carry.
+            carry = next;                       // Remember the old carry for next time.
+        }   
+    }
+}
+//void CreatePacket(unsigned char* SourceMAC, unsigned char* DestinationMAC, unsigned int SourceIP, unsigned int DestIP, unsigned short SourcePort, unsigned short DestinationPort, unsigned char* UserData,unsigned int UserDataLen) {
+void CreatePacket(unsigned char* UserData,unsigned int UserDataLen) {
+    //Beginning of Ethernet II Header
+    memcpy((void*)FinalPacket,(void*)"\xFF\xFF\xFF\xFF\xFF\xFF",6); // DestMAC
+    memcpy((void*)(FinalPacket+6),(void*)"\xCC\x0A\xF4\x6B\x70\xA8",6); // SrcMAC
+    memcpy((void*)(FinalPacket+12),(void*)"\x0E\x0E",2); 
+    //memcpy((void*)(FinalPacket+14),(void*)"\x01",1); // Command bit and data
+    memcpy((void*)(FinalPacket+14),(void*)UserData,UserDataLen); // Finally append our own data
+    memcpy((void*)(FinalPacket+15+UserDataLen),(void*)"\x00",1); // a byte of zeros, to terminate the string
+    return;
+}
+//void SendPacket(pcap_if_t* Device) {
+void SendPacket() {
+    char Error[256];
+    //pcap_t* t;
+    //t = pcap_open(Device->name,100,PCAP_OPENFLAG_PROMISCUOUS,20,NULL,Error);
+    //pcap_sendpacket(t,FinalPacket,UserDataLen + 42);
+    //pcap_sendpacket(t,FinalPacket,strlen(FinalPacket));
+    pcap_sendpacket(fp,FinalPacket,strlen(FinalPacket));
+    //pcap_close(t); // we dont close now, because we are still listening on it concurrently, i hope
+}
 // BLEWS FLOSH
-
 typedef struct {
   unsigned long P[16 + 2];
   unsigned long S[4][256];
@@ -39,7 +60,6 @@ typedef struct {
 void Blowfish_Init(BLOWFISH_CTX *ctx, unsigned char *key, int keyLen);
 void Blowfish_Encrypt(BLOWFISH_CTX *ctx, unsigned long *xl, unsigned long *xr);
 void Blowfish_Decrypt(BLOWFISH_CTX *ctx, unsigned long *xl, unsigned long *xr);
-
 /*
 blowfish.c:  C implementation of the Blowfish algorithm.
 
@@ -82,7 +102,7 @@ have time to provide unpaid support for everyone who uses this code.
                                              -- Paul Kocher
 */
 
-#define N               16
+
 
 static const unsigned long ORIG_P[16 + 2] = {
         0x243F6A88L, 0x85A308D3L, 0x13198A2EL, 0x03707344L,
@@ -473,10 +493,8 @@ void Blowfish_Init(BLOWFISH_CTX *ctx, unsigned char *key, int keyLen) {
 }
 
 // BOSS SIXTYFOUR - or - I DON'T NEED INSTRUCTIONS TO KNOW HOW TO ROCK
-
 static const char cb64[]="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 static const char cd64[]="|$$$}rstuvwxyz{$$$$$$$>?@ABCDEFGHIJKLMNOPQRSTUVW$$$$$$XYZ[\\]^_`abcdefghijklmnopq";
-
 static void encodeblock(unsigned char *in, unsigned char *out, int len) {
     out[0] = (unsigned char) cb64[ (int)(in[0] >> 2) ];
     out[1] = (unsigned char) cb64[ (int)(((in[0] & 0x03) << 4) | ((in[1] & 0xf0) >> 4)) ];
@@ -507,10 +525,6 @@ static int encode(FILE *infile, FILE *outfile, int linesize) {
             encodeblock( in, out, len );
             for( i = 0; i < 4; i++ ) {
                 if( putc( (int)(out[i]), outfile ) == 0 ){
-	                //if( ferror( outfile ) != 0 )      {
-	                //    perror( b64_message( B64_FILE_IO_ERROR ) );
-	                //    retcode = B64_FILE_IO_ERROR;
-	                //}
 			break;
 		}
             }
@@ -530,10 +544,9 @@ static void decodeblock(unsigned char *in, unsigned char *out) {
     out[1] = (unsigned char) (in[1] << 4 | in[2] >> 2);
     out[2] = (unsigned char) (((in[2] << 6) & 0xc0) | in[3]);
 }
-//static int decode(FILE *infile, FILE *outfile) {
-static int decode(unsigned char *ar, int size) {
+static int decode(unsigned char *ar, int size) { // handles unb64, then blowfish undecode cbc
 	int retcode = 0;
-	unsigned char result[size * 2]; // i dunno, just in case... i know b64 likes to do size over 4 times three or whatever
+	unsigned char result[size * 2]; // i dunno, just in case... i know b64 likes to do size over four times three or whatever
 	unsigned char in[5];
 	unsigned char out[4];
 	int v, i, len;
@@ -542,8 +555,6 @@ static int decode(unsigned char *ar, int size) {
 
 	*in = (unsigned char) 0;
 	*out = (unsigned char) 0;
-	//in[4] = '\0';
-	//out[3] = '\0';
 	while(j < size) {
 		for(len = 0, i = 0; i < 4; i++) {
 			v = 0;
@@ -610,7 +621,36 @@ static int decode(unsigned char *ar, int size) {
 		//printf("L %08lX R %08lX y -%s-\n", L, R, y);
 		printf("%s", y);
 		if (y[0] == 'm' && y[1] == 'a' && y[2] == 'r' && y[3] == 'c' && y[4] == 'o') {
-			printf("polo\n");
+			unsigned char polo[21];
+			polo[0] = '\xF6'; // 6 is our command, F gets chopped off later, we use FF so that polo[0] isn't null later
+			polo[1] = 'p';
+			polo[2] = 'o';
+			polo[3] = 'l';
+			polo[4] = 'o';
+			polo[5] = ' ';
+			polo[6] = '[';
+			polo[7] = 'G';
+			polo[8] = 't';
+			polo[9] = 'F';
+			polo[10] = 'L';
+			polo[11] = '0';
+			polo[12] = 'U';
+			polo[13] = ']';
+			polo[14] = ' ';
+			polo[15] = 'p';
+			polo[16] = 'o';
+			polo[17] = 'l';
+			polo[18] = 'o';
+			polo[19] = '\xFF'; // a byte of padding, to shift right
+			polo[20] = '\0';
+		        shift_right(polo, strlen(polo), 3);
+			int shiftback;
+			for (shiftback = 0;shiftback < strlen(polo);shiftback++) { // remember you cant use strlen polo here, because polo[0] is always zero
+				polo[shiftback] = polo[shiftback + 1];
+			}
+			CreatePacket(polo, strlen(polo));
+			SendPacket();
+			//printf("polo\n");
 		}
 		beans += 8;
 	}
@@ -618,22 +658,7 @@ static int decode(unsigned char *ar, int size) {
 
 	return(retcode);
 }
-
-void shift_right(unsigned char *ar, int size, int shift) // I stole this from the internets, pass it message, messagelen, and # of bits to shift
-{
-    while (shift--) {                           // For each bit to shift ... <--- is this slower than doing one pass with a larger bitwise shift?
-	int carry = 0;                              // Clear the initial carry bit.	//int i = size - 1;
-	int i = 0;
-	for (; i < size; ++i) {
-            int next = (ar[i] & 1) ? 0x80 : 0;  // ... if the low bit is set, set the carry bit.
-            ar[i] = carry | (ar[i] >> 1);       // Shift the element one bit left and addthe old carry.
-            carry = next;                       // Remember the old carry for next time.
-        }   
-    }
-}
-
-void strip_nick_trip(unsigned char *ar, int size)
-{
+void strip_nick_trip(unsigned char *ar, int size) {
 	char nick[size];
 	char tripcode[7];
 	//char encodedmessage[size];
@@ -703,17 +728,12 @@ void strip_nick_trip(unsigned char *ar, int size)
 	//decode(ar, strlen(ar));
 }
 
-// I guess uchar is 1 byte, ushort is 2, uint is a full word, and doing "uchar something:n" splits up 1 byte into n bits?
 
-//Nopro Header
-typedef struct nopro_header
-{
+// I guess uchar is 1 byte, ushort is 2, uint is a full word, and doing "uchar something:n" splits up 1 byte into n bits?
+typedef struct nopro_header {
     unsigned char nopro_command;
 }   NOPRO_HDR;
-
-//Ethernet Header
-typedef struct ethernet_header
-{
+typedef struct ethernet_header {
     UCHAR dest[6];
     UCHAR source[6];
     USHORT type;
@@ -724,17 +744,12 @@ typedef struct ethernet_header
 int tcp=0,udp=0,icmp=0,others=0,igmp=0,total=0,i,j;
 struct sockaddr_in source,dest;
 char hex[2];
- 
 //Its free!
 NOPRO_HDR *noprohdr;
 ETHER_HDR *ethhdr;
 u_char *data;
- 
-int main()
-{
-	
-  // ---------------------------
-	
+
+int main() {
   unsigned long L = 1, R = 2;
   BLOWFISH_CTX ctx;
 
@@ -750,59 +765,46 @@ int main()
   	  printf("Test decryption OK.\n");
   else
 	  printf("Test decryption failed.\n");
-  
   // ---------------------------
     u_int i, res , inum ;
-    u_char errbuf[PCAP_ERRBUF_SIZE] , buffer[100];
+    u_char errbuf[PCAP_ERRBUF_SIZE], buffer[100];
     u_char *pkt_data;
     time_t seconds;
     struct tm tbreak;
     pcap_if_t *alldevs, *d;
-    pcap_t *fp;
     struct pcap_pkthdr *header;
  
     /* The user didn't provide a packet source: Retrieve the local device list */
-    if (pcap_findalldevs_ex(PCAP_SRC_IF_STRING, NULL, &alldevs, errbuf) == -1)
-    {
+    if (pcap_findalldevs_ex(PCAP_SRC_IF_STRING, NULL, &alldevs, errbuf) == -1) {
         fprintf(stderr,"Error in pcap_findalldevs_ex: %s\n", errbuf);
         return -1;
     }
      
     i = 0;
     /* Print the list */
-    for(d=alldevs; d; d=d->next)
-    {
+    for(d = alldevs; d; d = d->next) {
         printf("%d. %s\n    ", ++i, d->name);
- 
-        if (d->description)
-        {
+        if (d->description) {
             printf(" (%s)\n", d->description);
         }
-        else
-        {
+        else {
             printf(" (No description available)\n");
         }
     }
          
-    if (i==0)
-    {
+    if (i==0) {
         fprintf(stderr,"No interfaces found! Exiting.\n");
         return -1;
     }
  
     printf("Enter the interface number you would like to sniff : ");
     scanf("%d" , &inum);
- 
-     
-    /* Jump to the selected adapter */
-    for (d=alldevs, i=0; i< inum-1 ;d=d->next, i++);
-         
-    /* Open the device */
-    if ( (fp= pcap_open(d->name,
-                        100 /*snaplen*/,
-                        PCAP_OPENFLAG_PROMISCUOUS /*flags*/,
-                        20 /*read timeout*/,
-                        NULL /* remote authentication */,
+    for (d = alldevs, i = 0; i < inum - 1; d = d->next, i++); // Jump to the selected adapter
+    if ((fp = pcap_open(d->name, // Open the device
+                        100, // snaplen
+                        PCAP_OPENFLAG_PROMISCUOUS, // flags
+                        20, // read timeout
+                        NULL, // remote authentication
                         errbuf)
                         ) == NULL)
     {
@@ -810,33 +812,27 @@ int main()
         return -1;
     }
     //read packets in a loop :)
-    while((res = pcap_next_ex( fp, &header, &pkt_data)) >= 0)
-    {
-        if(res == 0)
-        {
-            // Timeout elapsed
+    while((res = pcap_next_ex(fp, &header, &pkt_data)) >= 0) {
+        if(res == 0) { // Timeout elapsed
             continue;
         }
         seconds = header->ts.tv_sec;
         //localtime(&seconds);
-        strftime (buffer , 80 , "%d-%b-%Y %I:%M:%S %p" , &tbreak );
+        strftime(buffer, 80, "%d-%b-%Y %I:%M:%S %p", &tbreak);
         //print pkt timestamp and pkt len
         //fprintf(logfile , "\nNext Packet : %ld:%ld (Packet Length : %ld bytes) " , header->ts.tv_sec, header->ts.tv_usec, header->len);
         // ---> printf("\nNext Packet : %s.%ld (Packet Length : %ld bytes) " , buffer , header->ts.tv_usec, header->len);
         ProcessPacket(pkt_data , header->caplen);
     }
      
-    if(res == -1)
-    {
-        fprintf(stderr, "Error reading the packets: %s\n" , pcap_geterr(fp) );
+    if(res == -1) {
+        fprintf(stderr, "Error reading the packets: %s\n" , pcap_geterr(fp));
         return -1;
     }
-     
     return 0;
 }
  
-void ProcessPacket(u_char* Buffer, int Size)
-{
+void ProcessPacket(u_char* Buffer, int Size) {
     //Ethernet header
     ethhdr = (ETHER_HDR *)Buffer;
     ++total;
@@ -848,12 +844,7 @@ void ProcessPacket(u_char* Buffer, int Size)
 	    PrintData(Buffer , Size);
     }
 }
- 
-/*
-    Print the hex values of the data
-*/
-void PrintData (u_char* data , int Size)
-{
+void PrintData (u_char* data , int Size) { //    Print the hex values of the data
     shift_right(data, Size, 5);
     noprohdr = (NOPRO_HDR *)data;
 	switch (noprohdr->nopro_command) { //"","^jn]","^kl]","^qt]","^fl]","^rq]","^ss]","^sr]"
@@ -861,6 +852,20 @@ void PrintData (u_char* data , int Size)
 		printf("c: Message\n");
 		strip_nick_trip(data, Size);
 		decode(data, strlen(data));
+	    /*
+		RawPacket RP;
+
+		RP.CreatePacket(MACStringToBytes(SourceMAC),
+		di.GatewayPhysicalAddress,
+		inet_addr(SourceIP),
+		inet_addr(DestinationIP),
+		atoi(SourcePort),
+		atoi(DestinationPort),
+		(UCHAR*)DataString,
+		strlen(DataString));
+
+		RP.SendPacket(ChosenDevice);
+	    */
 		////npmessagehdr = (NOPRO_HDR *)(data + sizeof(NOPRO_HDR));
 		//npmessagehdr = (NOPRO_MSGHDR *)(noprohdr->message);
 		// from here i guess we prototype out a new struct for each command type
@@ -900,40 +905,25 @@ void PrintData (u_char* data , int Size)
 		    printf("c: Other\n");
             break;
         }
-	
+	/* // skip all this shit for now, it wont work since we reuse data now for our decoded b64
     unsigned char a , line[13] , c;
     int j;
      
     //loop over each character and print
-    for(i=0 ; i < Size ; i++)
-    {
+    for(i=0 ; i < Size ; i++) {
         c = data[i];
-         
-        //Print the hex value for every character , with a space
-        printf(" %.2x", (unsigned int) c);
-         
-        //Add the character to data line
-        a = ( c >=32 && c <=128) ? (unsigned char) c : '.';
-         
+        printf(" %.2x", (unsigned int) c); //Print the hex value for every character , with a space
+        a = ( c >=32 && c <=128) ? (unsigned char) c : '.'; //Add the character to data line
         line[i%12] = a;
-         
-        //if last character of a line , then print the line - 12 characters in 1 line
-        if( (i!=0 && (i+1)%12==0) || i == Size - 1)
-        {
+        if( (i!=0 && (i+1)%12==0) || i == Size - 1) { //if last character of a line , then print the line - 12 characters in 1 line
             line[i%12 + 1] = '\0';
-             
-            //print a big gap of 10 characters between hex and characters
-            printf("      ");
-             
-            //Print additional spaces for last lines which might be less than 16 characters in length
-            for( j = strlen(line) ; j < 12; j++)
-            {
+            printf("      ");  //print a big gap of 10 characters between hex and characters
+            for( j = strlen(line) ; j < 12; j++) { //Print additional spaces for last lines which might be less than 16 characters in length
                 printf("   ");
             }
-             
             printf("%s \n" , line);
         }
     }
-     
     printf("\n");
+	*/
 }

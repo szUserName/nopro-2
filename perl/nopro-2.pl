@@ -516,14 +516,23 @@ sub useThisNIC { ## create main tk and main burn loop
 				$chatrooms{$ltitype}[2]{$thisguy}[1] = $stamp;
 				$chatrooms{$ltitype}[0][3]->insert('end',$thisguy,"s");
 				$chatrooms{$ltitype}[0][3]->yview('moveto','1.0');
-				$TOP->focus(-force);
+				##$TOP->focus(-force);
 			}
 			elsif ($lti =~ /^\^sr\]/) { ## shellresponse
-				$thisguy = concise($rendecu,$',1);
-				$chatrooms{$ltitype}[2]{$thisguy}[1] = $stamp;
-				$chatrooms{$ltitype}[0][3]->insert('end',$thisguy,"s");
-				$chatrooms{$ltitype}[0][3]->yview('moveto','1.0');
-				$TOP->focus(-force);
+				$thisguy = $1 . concise($rendecu,$',1);
+				if ($thisguy =~ /^(.*?)\s(\[.*?\])\s/) {
+					$chatrooms{$ltitype}[2]{$1}[1] = $stamp;
+					$chatrooms{$ltitype}[0][3]->insert('end',"\n");
+					$chatrooms{$ltitype}[0][3]->insert('end',$hora . ":" . sprintf("%02d",$min) . ":" . sprintf("%02d",$sec) . " ","j") if $chatrooms{$ltitype}[4][1]; # timestamp
+					$chatrooms{$ltitype}[0][3]->insert('end',$1 . " ","c1"); # name
+					$chatrooms{$ltitype}[0][3]->insert('end',$2 . " ","c2") if $chatrooms{$ltitype}[4][2]; # tripcode
+					$chatrooms{$ltitype}[0][3]->insert('end',$',"s"); # text
+					$chatrooms{$ltitype}[0][3]->yview('moveto','1.0');
+					##$TOP->focus(-force); # this fucks with entry widgets regaining focus after you type a message, move this outside just message events anyways
+					unless ($ltitype eq $active) {
+						$chatrooms{$ltitype}[3]++; ## flash message updates, move this to all updates later
+					}
+				}
 			}
 			elsif ($lti =~ /^(.*?\s\[.*?\]\s)/) { # messages
 				$thisguy = $1 . concise($rendecu,$',1);

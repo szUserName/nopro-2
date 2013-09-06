@@ -174,13 +174,13 @@ sub printPackets { ## Parses packets into human readable, crafts response based 
 		return;
 	}
 	#add in delayed print here to provide for IP filtering later, wihth;
-	#print thetime() . ap($nocolour) . "MAC SRC:" . ap("1;32") . $macaddysrc . ap($nocolour) . " MAC DEST:" . ap("1;31") . $macaddydest . ap(0) . "\n";
+	print thetime() . ap($nocolour) . "MAC SRC:" . ap("1;32") . $macaddysrc . ap($nocolour) . " MAC DEST:" . ap("1;31") . $macaddydest . ap(0) . "\n";
 	print $vlan;
 	if (hex($etherall) < 0x05dc) { ## I'm still not 100% certain this is working as intended, but it seems to work
-		#print ap($nocolour) . "Network Layer Protocol: " . ap("1;35") . $etherall . " IEEE802.3 LLC SAP Frame" . ap(0) . "\n";
+		print ap($nocolour) . "Network Layer Protocol: " . ap("1;35") . $etherall . " IEEE802.3 LLC SAP Frame" . ap(0) . "\n";
 	}
 	else {
-		#print ap($nocolour) . "Network Layer Protocol: " . ap("1;35") . ethertype($etherall) . ap(0) . "\n";
+		print ap($nocolour) . "Network Layer Protocol: " . ap("1;35") . ethertype($etherall) . ap(0) . "\n";
 	}
 	## add recursive vlan checks here, with goto to circle back to the underlying protocols
 	if($etherall eq "0800") { ## DIX Ethernet II frame
