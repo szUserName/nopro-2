@@ -326,7 +326,7 @@ sub newroom { ## create a new tab and listen on a new ethertype
 	$chatrooms{$rewm}[0][3]->tagConfigure("c3", -foreground => "#000000"); ## text colour
 	$chatrooms{$rewm}[0][3]->tagConfigure("q", -foreground => "#AF1010"); ## quit colour
 	$chatrooms{$rewm}[0][3]->tagConfigure("j", -foreground => "#1010AF"); ## join colour
-	$chatrooms{$rewm}[0][3]->tagConfigure("s", -foreground => "#303030"); ## shell colour
+	$chatrooms{$rewm}[0][3]->tagConfigure("s", -foreground => "#9F009F"); ## shell colour
 	## Check if the room is a known protocol
 	if (chkethertype($rewm) ne "Unassigned") {
 		$chatrooms{$rewm}[0][3]->insert('end',chkethertype($rewm),"q");
@@ -519,18 +519,21 @@ sub useThisNIC { ## create main tk and main burn loop
 				##$TOP->focus(-force);
 			}
 			elsif ($lti =~ /^\^sr\]/) { ## shellresponse
-				$thisguy = $1 . concise($rendecu,$',1);
-				if ($thisguy =~ /^(.*?)\s(\[.*?\])\s/) {
-					$chatrooms{$ltitype}[2]{$1}[1] = $stamp;
-					$chatrooms{$ltitype}[0][3]->insert('end',"\n");
-					$chatrooms{$ltitype}[0][3]->insert('end',$hora . ":" . sprintf("%02d",$min) . ":" . sprintf("%02d",$sec) . " ","j") if $chatrooms{$ltitype}[4][1]; # timestamp
-					$chatrooms{$ltitype}[0][3]->insert('end',$1 . " ","c1"); # name
-					$chatrooms{$ltitype}[0][3]->insert('end',$2 . " ","c2") if $chatrooms{$ltitype}[4][2]; # tripcode
-					$chatrooms{$ltitype}[0][3]->insert('end',$',"s"); # text
-					$chatrooms{$ltitype}[0][3]->yview('moveto','1.0');
-					##$TOP->focus(-force); # this fucks with entry widgets regaining focus after you type a message, move this outside just message events anyways
-					unless ($ltitype eq $active) {
-						$chatrooms{$ltitype}[3]++; ## flash message updates, move this to all updates later
+				$lti = $';
+				if ($lti =~ /^(.*?\s\[.*?\]\s)/) {
+					$thisguy = $1 . concise($rendecu,$',1);
+					if ($thisguy =~ /^(.*?)\s(\[.*?\])\s/) {
+						$chatrooms{$ltitype}[2]{$1}[1] = $stamp;
+						$chatrooms{$ltitype}[0][3]->insert('end',"\n");
+						$chatrooms{$ltitype}[0][3]->insert('end',$hora . ":" . sprintf("%02d",$min) . ":" . sprintf("%02d",$sec) . " ","j") if $chatrooms{$ltitype}[4][1]; # timestamp
+						$chatrooms{$ltitype}[0][3]->insert('end',$1 . " ","c1"); # name
+						$chatrooms{$ltitype}[0][3]->insert('end',$2 . " ","c2") if $chatrooms{$ltitype}[4][2]; # tripcode
+						$chatrooms{$ltitype}[0][3]->insert('end',$',"s"); # text
+						$chatrooms{$ltitype}[0][3]->yview('moveto','1.0');
+						##$TOP->focus(-force); # this fucks with entry widgets regaining focus after you type a message, move this outside just message events anyways
+						unless ($ltitype eq $active) {
+							$chatrooms{$ltitype}[3]++; ## flash message updates, move this to all updates later
+						}
 					}
 				}
 			}
@@ -699,7 +702,7 @@ sub tosspacket { ## crafts packets
 		$sourcemac .= chr($toctet);
 	}
 	#$sourcemac = "\x00\xAA\xBB\xCC\xDD\xEE";  ## uncomment if you're into hardcoding
-	$soyeah =  "\xFF\xFF\xFF\xFF\xFF\xFF" . $sourcemac . pack("H*",$tptype) . pack('B*',$aptype . $pa . $bp); ## pack two bits of ptype, eleven bits of size, payload in mults of 8, and two random bits.  This keeps ascii from being displayed overtly on sniffers without having to add another encryption layer
+	$soyeah =  "\xFF\xFF\xFF\xFF\xFF\xFF" . $sourcemac . pack("H*",$tptype) . pack('B*',$aptype . $pa . $bp); ## pack two bits of ptype, payload in mults of 8, and two random bits.  This keeps ascii from being displayed overtly on sniffers without having to add another encryption layer
 	## TO ADD: If ^^ are odd bits, this will be treated as a multicast MAC address and SHOULD be broadcasted as well, since many devices don't distinguish between broadcast and multicast.  Might be useful for extra evasion.
 	## Note: I think my interface or some switch is adding nulls to make my packets a good length, so we account for this in printpackets.
 	$soy->SendPacket($soyeah);
