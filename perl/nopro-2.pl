@@ -67,7 +67,6 @@
 ## 17. Find mouseover background colours for buttons and customize them.
 ## 18. Change individual tab colours for when a channel had an update
 ## 19. Change nicklist to a scrolled (osoe)
-## 20. DONE: Fixed a minor race condition where you could delete a room while the burn loop was still processing its values in the data structure
 ## 21. Make sure we limit data sent for shell responses if we get more than 5000 or so bytes of data
 ## 22. When someone freezes out, it freezefloods the channel.  This was after i went from active to disabled, if that matters.
 
