@@ -22,6 +22,7 @@ my $useadapter = 0;
 our $regex = "";
 our $filter = "";
 our $dumphex = 0;
+our $filteretype = "";
 
 $nocolour = "1;30";
 
@@ -35,16 +36,18 @@ GetOptions(
 	"i=i" => \$useadapter,
 	"r=s"   => \$regex,
 	"f=s"   => \$filter,
-	"x"   => \$dumphex
+	"x"   => \$dumphex,
+	"p=s" => \$filteretype
 	);
 # add option for payload highlighting without payload filtering
 if ($halp > 0) {
 	print "-a\tANSI color output\n";
 	print "-d\tShow payloads\n";
 	print "-e\tSupresses common ethertypes:\n\tInternet Protocol Version 4 (0800)\n\tPer-VLAN Spanning Tree Plus (0032 usually)\n\tInternet Protocol Version 6 (86DD)\n\tEthernet Configuration Testing Protocol (9000)\n\tAddress Resolution Protocl (0806)\n\tLink Layer Discovery Protocol (88CC)\n\tCisco Discovery Protocol (006F usually)\n\tEAP over LAN (888E)\n";
-	print "-f [s]\tFilter by IPv4\n";
+	print "-f [s]\tFilter by IPv4 address\n";
 	print "-h\tThis cruft\n";
 	print "-i [n]\tAdapter number\n";
+	print "-p [s]\tFilter by ethertype\n";
 	print "-r [s]\tRegex filter and payload highlighting\n";
 	print "-s\tSupresses Internet Protocol Version 4 (0800)\n";
 	print "-t\tTimestamp\n";
@@ -170,17 +173,23 @@ sub printPackets { ## Parses packets into human readable, crafts response based 
 	if ($etherall eq "0800" || $etherall eq "0032" || $etherall eq "86DD" || $etherall eq "9000" || $etherall eq "0806" || $etherall eq "88CC" || $etherall eq "006F" || $etherall eq "888E") { 
 		return if $suppressetype > 0;
 	}
+	if ($filteretype ne "") {
+		return unless $filteretype eq $etherall;
+	}
 	unless ($data =~ /$regex/i) {
 		return;
 	}
-	#add in delayed print here to provide for IP filtering later, wihth;
-	print thetime() . ap($nocolour) . "MAC SRC:" . ap("1;32") . $macaddysrc . ap($nocolour) . " MAC DEST:" . ap("1;31") . $macaddydest . ap(0) . "\n";
+	$macinfo = "";
+	$macinfo .= thetime() . ap($nocolour) . "MAC SRC:" . ap("1;32") . $macaddysrc . ap($nocolour) . " MAC DEST:" . ap("1;31") . $macaddydest . ap(0) . "\n";
 	print $vlan;
 	if (hex($etherall) < 0x05dc) { ## I'm still not 100% certain this is working as intended, but it seems to work
-		print ap($nocolour) . "Network Layer Protocol: " . ap("1;35") . $etherall . " IEEE802.3 LLC SAP Frame" . ap(0) . "\n";
+		$macinfo .= ap($nocolour) . "Network Layer Protocol: " . ap("1;35") . $etherall . " IEEE802.3 LLC SAP Frame" . ap(0) . "\n";
 	}
 	else {
-		print ap($nocolour) . "Network Layer Protocol: " . ap("1;35") . ethertype($etherall) . ap(0) . "\n";
+		$macinfo .= ap($nocolour) . "Network Layer Protocol: " . ap("1;35") . ethertype($etherall) . ap(0) . "\n";
+	}
+	if ($filter eq "") {
+		print $macinfo;
 	}
 	## add recursive vlan checks here, with goto to circle back to the underlying protocols
 	if($etherall eq "0800") { ## DIX Ethernet II frame
@@ -194,6 +203,9 @@ sub printPackets { ## Parses packets into human readable, crafts response based 
 			if ($filter ne "") {
 				unless ($filter eq $srcaddress || $filter eq $dstaddress) {
 					return;
+				}
+				else {
+					print $macinfo;
 				}
 			}
 			$stathash{"Proto"}{datapro(parsehdra($hdrpro))}++;

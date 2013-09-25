@@ -239,6 +239,57 @@ sub writequeue { ## listen threads
 	Net::Pcap::loop($nic, -1, \&printPackets, '');
 }
 
+sub debugstring {
+	my $ar = shift;
+	$thislen = length($ar);
+	printf("Debugging string of " . ap("1;33") . $thislen . ap("1;30") . " bytes");
+	for($subi = 0;$subi<$thislen;$subi++) {
+		if ($subi % 32 == 0) {
+			printf("\n");
+			printf(ap("1;30") . "     ");
+			for($thisit=0;$thisit<32;$thisit++) {
+				if ($subi + $thisit < $thislen) {
+					$curit = substr($ar,($subi + $thisit),1);
+					if (ord($curit) == 13) { ## carriage return
+						printf(ap("1;35") . "CR " . ap("1;30"));
+					}
+					elsif (ord($curit) == 10) { ## line feed
+						printf(ap("1;35") . "LF " . ap("1;30"));
+					}
+					elsif (ord($curit) == 7) { ## bell
+						printf(ap("1;32") . "BL " . ap("1;30"));
+					}
+					elsif (ord($curit) == 9) { ## horizontal tab
+						printf(ap("1;36") . "HT " . ap("1;30"));
+					}
+					elsif (ord($curit) == 11) { ## vertical tab
+						printf(ap("1;36") . "VT " . ap("1;30"));
+					}
+					elsif (ord($curit) == 8) { ## backspace
+						printf(ap("1;32") . "BS " . ap("1;30"));
+					}
+					elsif (ord($curit) == 27) { ## ansi
+						printf(ap("1;32") . "AN " . ap("1;30"));
+					}
+					else {
+						printf(" %s ",$curit);
+					}
+				}
+			}
+			printf("\n" . ap("1;37") . "%04x " . ap("1;31"),$subi);
+		}
+		elsif ($subi % 16 == 0) {
+			printf(ap("1;31"));
+		}
+		elsif ($subi % 8 == 0) {
+			printf(ap("1;34"));
+		}
+		printf("%02x ",ord(substr($ar,$subi,1)));
+
+	}
+	printf(ap("1;30") . "\nEnd Debug\n");
+}
+
 sub concise { ## cipher block chainer for enc/dec
 	my ($key,$input,$type) = @_;
 	if (length($key) < 8) {
@@ -248,7 +299,9 @@ sub concise { ## cipher block chainer for enc/dec
 		$key = substr($key,0,56);
 	}
 	my $pwcrypt = new Crypt::Blowfish_PP $key;
+	##debugstring($input);
 	$input = decode_base64($input . ("=" x (12 - (length($input) % 12)))) if $type; 
+	##debugstring($input) if $type;
 	my $vallen = length($input);
 	my $tempcipher = "";
 	for ($valprime = 0; $vallen > 0; $valprime += 8) {
@@ -262,14 +315,17 @@ sub concise { ## cipher block chainer for enc/dec
 		$vallen -= 8;
 		$tempcipher .= $type?$pwcrypt->decrypt($valstr):$pwcrypt->encrypt($valstr);
 	}
+	##debugstring($tempcipher);
 	if ($type) {
 		$tempcipher =~ s/\0//g;
 	}
 	else {
 		$tempcipher = encode_base64($tempcipher, ""); ## default is \n line separator between each 76 bytes, specify empty string to fix this
+		##debugstring($tempcipher);
 		chomp($tempcipher);
 		$tempcipher =~ s/=//g;
 	}
+
 	return $tempcipher;
 }
 
