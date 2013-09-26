@@ -913,31 +913,19 @@ ETHER_HDR *ethhdr;
 u_char *data;
 
 int main() {
-printf("PID: %d\n\n",getpid());
+	printf("PID: %d\n\n",getpid());
 	unsigned long L = 1, R = 2;
-  BLOWFISH_CTX ctx;
-
-  Blowfish_Init (&ctx, (unsigned char*)"allcalma", 8);
-  Blowfish_Encrypt(&ctx, &L, &R);
-  printf("%08lX %08lX\n", L, R);
-  if (L == 0xDF333FD2L && R == 0x30A71BB4L)
-	  printf("Test encryption OK.\n");
-  else
-	  printf("Test encryption failed.\n");
-  Blowfish_Decrypt(&ctx, &L, &R);
-  if (L == 1 && R == 2)
-  	  printf("Test decryption OK.\n");
-  else
-	  printf("Test decryption failed.\n");
-  // ---------------------------
-
-    u_int i, res , inum ;
-    u_char errbuf[PCAP_ERRBUF_SIZE], buffer[100];
-    u_char *pkt_data;
-    time_t seconds;
-    struct tm tbreak;
-    pcap_if_t *alldevs, *d;
-    struct pcap_pkthdr *header;
+	BLOWFISH_CTX ctx;
+	Blowfish_Init (&ctx, (unsigned char*)"allcalma", 8);
+	Blowfish_Encrypt(&ctx, &L, &R);
+	Blowfish_Decrypt(&ctx, &L, &R);
+	u_int i, res , inum ;
+	u_char errbuf[PCAP_ERRBUF_SIZE], buffer[100];
+	u_char *pkt_data;
+	time_t seconds;
+	struct tm tbreak;
+	pcap_if_t *alldevs, *d;
+	struct pcap_pkthdr *header;
  
     /* The user didn't provide a packet source: Retrieve the local device list */
     if (pcap_findalldevs_ex(PCAP_SRC_IF_STRING, NULL, &alldevs, errbuf) == -1) {
@@ -948,12 +936,28 @@ printf("PID: %d\n\n",getpid());
     i = 0;
     /* Print the list */
     for(d = alldevs; d; d = d->next) {
-        printf("%d. %s\n    ", ++i, d->name);
+        //printf("%d. %s\n    ", ++i, d->name);
         if (d->description) {
-            printf(" (%s)\n", d->description);
+		int adapt;
+		adapt = strlen(d->description);
+		if (d->description[16] == '\'' && d->description[adapt - 15] == '\'') {
+			printf("%d. ",++i);
+			int bob;
+			adapt -= 15;
+			if (d->description[adapt - 2] == ')' && d->description[adapt - 31] == '(') {
+				adapt -= 32;
+			}
+			for (bob = 17;bob < adapt;bob++) {
+				printf("%c",d->description[bob]);
+			}
+			printf("\n");
+		}
+		else {
+			printf("%d. %s\n",++i,d->description);
+		}
         }
         else {
-            printf(" (No description available)\n");
+            printf("%d. No description available\n",++i);
         }
     }
          
@@ -962,11 +966,11 @@ printf("PID: %d\n\n",getpid());
         return -1;
     }
  
-    printf("Enter the interface number you would like to sniff : ");
+    printf("\nEnter the interface number you would like to sniff: ");
     scanf("%d" , &inum);
     for (d = alldevs, i = 0; i < inum - 1; d = d->next, i++); // Jump to the selected adapter
     if ((fp = pcap_open(d->name, // Open the device
-                        100, // snaplen
+                        65535, // snaplen
                         PCAP_OPENFLAG_PROMISCUOUS, // flags
                         20, // read timeout
                         NULL, // remote authentication

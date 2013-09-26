@@ -11,7 +11,7 @@
 
 ## DATA STRUCTURE:
 ## %chatrooms{$ethertype}[
-##				widgets (0) Room Tabs: [tab(0),entry(1),label(2),scrolled(3),close(4),resize(5),heartbeat(6,7,8),chatoptions(9,10)]
+##				widgets (0) Room Tabs: [tab(0),entry(1),label(2),scrolled(3),close(4),resize(5),heartbeat(6,7,8),chatoptions(9,10),commandtargetentry(11)]
 ##					    New Tab:   [tab(0),etype(1),letype(2),lnick(3),nick(4),ltrip(5),trip(6),lkey(7),key(8),exit(9),resize(10),joinbutton(11),heartbeat(12,13,14,15),chatoptions(16,17,18)]
 ##				messages (1) [messageindex][handle,tripcode,message]
 ##				userlist (2) {username => [lastactiveheartbeattimestamp,lastpackettimestamp,messagebuffer]}
@@ -409,8 +409,10 @@ sub newroom { ## create a new tab and listen on a new ethertype
 	$chatrooms{$rewm}[0][2]->tagConfigure("hc3", -background => "#7F00FF"); ## heatmap room colour
 	$chatrooms{$rewm}[0][2]->tagConfigure("hc4", -background => "#3366FF"); ## heatmap cool colour
 	$chatrooms{$rewm}[0][2]->tagConfigure("hc5", -background => "#00FFFF"); ## heatmap ice cold! colour
+	## Command target
+	$chatrooms{$rewm}[0][11] = $chatrooms{$rewm}[0][0]->Entry()->place(-height => "16", -width => "100", -rely => "1.0", -relx => "1.0", -"y" => "-21", -x => "-196");
 	## Input widget
-	$chatrooms{$rewm}[0][1] = $chatrooms{$rewm}[0][0]->Entry()->place(-height => "16", -relwidth => "1.0", -width => "-102", -rely => "1.0", -"y" => "-21", -x => "5");
+	$chatrooms{$rewm}[0][1] = $chatrooms{$rewm}[0][0]->Entry()->place(-height => "16", -relwidth => "1.0", -width => "-202", -rely => "1.0", -"y" => "-21", -x => "5");
 	$chatrooms{$rewm}[0][1]->bind('<Return>' ,sub{broadcast($rewm); });
 	$chatrooms{$rewm}[0][1]->focus;
 	{ ## this essentially enables sniffing for this ethertype
@@ -787,6 +789,10 @@ sub tosspacket { ## crafts packets
 sub broadcast { ## encrypts text from entry widgets then sends it to the packet crafter
 	my ($betype) = shift;
 	$datums = $chatrooms{$betype}[0][1]->get();
+	$cmdcode = $chatrooms{$betype}[0][11]->get();
+	if ($cmdcode ne "") {
+		$datums = "$cmdcode $datums";
+	}
 	$chatrooms{$betype}[0][1]->delete(0.0,'end');
 	$mtuchunk = 0;
 	while (($mtuchunk * 900) < length($datums)) {
