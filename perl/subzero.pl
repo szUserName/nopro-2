@@ -123,10 +123,10 @@ sub apx {
 
 sub thetime {
 	if ($timestamp > 0) {
-		return "-----------------[" . ap("1;37") . scalar localtime() . ap($nocolour) . "]-----------------\n";
+		return "-----------------------[" . ap("1;37") . scalar localtime() . ap($nocolour) . "]------------------------\n";
 	}
 	else {
-		return "-" x 60 . "\n";
+		return "-" x 73 . "\n";
 	}
 }
 
@@ -210,7 +210,7 @@ sub printPackets { ## Parses packets into human readable, crafts response based 
 			}
 			$stathash{"Proto"}{datapro(parsehdra($hdrpro))}++;
 			print ap($nocolour), "IPV: ", ap("1;37"), parsehdra($hdripv), " ", dataipv(parsehdra($hdripv)), ap($nocolour), " IHL: ", ap("1;37"), parsehdra($hdrihl), ap($nocolour), " ID: ", ap("1;37"), parsehdra($hdrid), ap($nocolour), " DF: ", ap("1;37"), $hdrdf, ap($nocolour), " MF: ", ap("1;37"), $hdrmf, ap($nocolour), " TTL: " , ap("1;37"), parsehdra($hdrttl), ap($nocolour), " Protocol: " , ap("1;37"), parsehdra($hdrpro), " ", datapro(parsehdra($hdrpro)), ap(0), "\n";
-			printf ap($nocolour) . "%-13s" . ap("0;32") . "%-15s" . ap($nocolour) . "%-16s" . ap("0;31") . "%-15s" . ap(0) . "\n", "Src Address: ", $srcaddress , "  Dest Address: ", $dstaddress;
+			printf ap($nocolour) . "%-13s" . ap("0;32") . "%-16s" . ap($nocolour) . "%-16s" . ap("0;31") . "%-15s" . ap(0) . "\n", "Src Address: ", $srcaddress , "  Dest Address: ", $dstaddress;
 			$xdroffset = parsehdra($hdrihl);
 			$xdroffset *= 32;
 			if ($hdrihl eq "0101") {
@@ -226,9 +226,9 @@ sub printPackets { ## Parses packets into human readable, crafts response based 
 			$i += 20; ## we found an ip header and ipv4 which we printed, but we didnt find tcp, so increase beyond the ip header and print the rest as payload
 			if (parsehdra($hdrpro) == 6) { # TCP
 				my ($tdrsrc,$tdrdst,$tdrseq,$tdrack,$tdroff,$tdrsixres,$tdrflagurg,$tdrflagack,$tdrflagpsh,$tdrflagrst,$tdrflagsyn,$tdrflagfin,$tdrwin,$tdrchk,$tdrurg) = unpack 'a16a16a32a32a4a6aaaaaaa16a16a16', substr $xdrstr, $xdroffset;
-				printf ap($nocolour) . "%-13s" . ap("0;32") . "%-15s" . ap($nocolour) . "%-16s" . ap("0;31") . "%-15s" . ap(0) . "\n", "Src Port: ", parsehdra($tdrsrc), "  Dest Port: ", parsehdra($tdrdst);
-				printf ap($nocolour) . "%-13s" . ap("1;37") . "%-15s" . ap($nocolour) . "%-16s" . ap("1;37") . "%-15s" . ap(0) . "\n", "Seq: ", parsehdra($tdrseq), "  Ack: ", parsehdra($tdrack);
-				printf ap($nocolour) . "%-13s" . ap("1;37") . "%-15s" . ap($nocolour) . "%-16s", "Window: ", parsehdra($tdrwin), "  Flags: ";
+				printf ap($nocolour) . "%-13s" . ap("0;32") . "%-16s" . ap($nocolour) . "%-16s" . ap("0;31") . "%-15s" . ap(0) . "\n", "Src Port: ", parsehdra($tdrsrc), "  Dest Port: ", parsehdra($tdrdst);
+				printf ap($nocolour) . "%-13s" . ap("1;37") . "%-16s" . ap($nocolour) . "%-16s" . ap("1;37") . "%-15s" . ap(0) . "\n", "Seq: ", parsehdra($tdrseq), "  Ack: ", parsehdra($tdrack);
+				printf ap($nocolour) . "%-13s" . ap("1;37") . "%-16s" . ap($nocolour) . "%-16s", "Window: ", parsehdra($tdrwin), "  Flags: ";
 				$tdrflagurg ? print ap("1;37") . "URG " : eval(1);
 				$tdrflagack ? print ap("0;32") . "ACK " : eval(1);
 				$tdrflagpsh ? print ap("1;33") . "PSH " : eval(1);
@@ -332,7 +332,11 @@ sub printPackets { ## Parses packets into human readable, crafts response based 
 			}
 			elsif (parsehdra($hdrpro) == 17) { #UDP
 				my ($udpsport,$udpdport,$udplen,$udpchecksum) = unpack 'a16a16a16a16', substr $xdrstr, $xdroffset;
-				print ap($nocolour), "Src Port: ", ap("0;32"), parsehdra($udpsport), ap($nocolour), " Dest Port: ", ap("0;31"), parsehdra($udpdport), ap($nocolour), " Length: ", ap("1;37"), parsehdra($udplen), ap($nocolour), " Chksum: ", ap("1;37"), parsehdra($udpchecksum), ap(0), "\n";
+				##print ap($nocolour), "Src Port: ", ap("0;32"), parsehdra($udpsport), ap($nocolour), " Dest Port: ", ap("0;31"), parsehdra($udpdport), ap($nocolour), " Length: ", ap("1;37"), parsehdra($udplen), ap($nocolour), " Chksum: ", ap("1;37"), parsehdra($udpchecksum), ap(0), "\n";
+				
+				printf ap($nocolour) . "%-13s" . ap("0;32") . "%-16s" . ap($nocolour) . "%-16s" . ap("0;31") . "%-15s" . ap(0) . "\n", "Src Port: ", parsehdra($udpsport), "  Dest Port: ", parsehdra($udpdport);
+				printf ap($nocolour) . "%-13s" . ap("1;37") . "%-16s" . ap($nocolour) . "%-16s" . ap("1;37") . "%-15s" . ap(0) . "\n", "Length: ", parsehdra($udplen), "  Chksum: ", parsehdra($udpchecksum);
+				
 				$i += 8; ## we found a udp header, so skip past 8 bytes for the purpose of payload printing
 			}
 		}
@@ -379,21 +383,23 @@ sub printPackets { ## Parses packets into human readable, crafts response based 
 	if ($datatoo > 0) {
 		my %highlightpayload;
 		$ndata = substr $data, $i;
-		while ($ndata =~ /$regex/ig) {
-			$highlightpayload[1]{$-[0]}++;
-			$highlightpayload[0]{$+[0]}++;
+		if ($regex ne "") {
+			while ($ndata =~ /$regex/ig) {
+				$highlightpayload[1]{$-[0]}++;
+				$highlightpayload[0]{$+[0]}++;
+			}
 		}
 		$thischar = 0;
 		$hexchar = 0;
 		$hexhighlight = "1;36";
 		$currenthighlight = "1;33";
-		$payloadOutputLength = ($dumphex > 0?12:60);
+		$payloadOutputLength = ($dumphex > 0?16:73);
 		until ($i>=$caplen) {
 			#local $,=' ';
 			my $lg = substr $data, $i, $payloadOutputLength;
 			$i+=$payloadOutputLength;
 			if ($dumphex > 0) {
-				printf ap("1;34") . "%.8X  ", $i;
+				printf ap("1;34") . "%.8X ", $i;
 				foreach my $hexuchar (split('',$lg)) {
 					if (exists $highlightpayload[1]{$hexchar}) {
 						$hexhighlight = "1;37";
