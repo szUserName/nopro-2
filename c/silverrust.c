@@ -32,10 +32,19 @@ typedef struct udp_header {
 	unsigned short udplen;
 	unsigned short udpcheck;
 } UDP_HDR;
+typedef struct rust_coord {
+	unsigned short camx;
+	unsigned short camy;
+	unsigned short camz;
+	unsigned long coordx;
+	unsigned long coordy;
+	unsigned short coordz;
+} RUST_COORD;
 
 ETHER_HDR *ethhdr;
 IP_HDR *iphdr;
 UDP_HDR *udphdr;
+RUST_COORD *rustcoord;
 unsigned char *data;
 
 int main() {
@@ -118,26 +127,42 @@ void PrintData (const unsigned char* data , int Size) {
 void ParseInstruction (const unsigned char* data , int Size) { // Instruction Parser
 	unsigned char clientID[5];
 	unsigned char clientName[65];
-	int i;
+	int i, j, k;
 	i = 0;
 	int Instruction;
 	Instruction = data[i++]; // instruction type
 	switch (Instruction) {
 		case 0x74: // new client found
 			i += 64;
-			int j;
 			j = 0;
 			for (;j < 4;j++) {
-				clientID[j] = data[i + j];
+				clientID[j] = data[i + j]; // set client ID 4 bytes
 			}
 			i += 8;
-			int k = data[i++];
+			k = data[i++]; // grab client name length byte
 			for (j = 0;j < k;j++) {
 				clientName[j] = data[i + j];
 			}
 			printf("Name %s is ID %s\n", clientName, clientID);
 		break;
 		case 0x2e: // read client move
+			j = 0;
+			for (;j < 4;j++) {
+				clientID[j] = data[i + j];
+			}
+			i += 4;
+			k = data[i++]; // grab command verb length byte
+			i += k; // skip that much data, since it's not important
+			data = (data + i);
+			rustcoord = (RUST_COORD *)data;
+			printf("ID %s is at %d,%d,%d with cam %d,%d,%d\n",
+					clientID,
+					ntohl(rustcoord->coordx),
+					ntohl(rustcoord->coordy),
+					ntohs(rustcoord->coordz),
+					ntohs(rustcoord->camx),
+					ntohs(rustcoord->camy),
+					ntohs(rustcoord->camz));
 		break;
 		case 0x7c: // get network update - we don't care about these probably
 		break;
