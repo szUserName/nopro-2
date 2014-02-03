@@ -5,9 +5,9 @@
 #include "pcap.h"
 // gcc -g silvermac.c -o silvermac -lpcap
 
-void ProcessPacket (u_char* , int);
+void ProcessPacket (const unsigned char* , int);
 //void print_ethernet_header (u_char*);
-void PrintData (u_char* , int);
+void PrintData (const unsigned char* , int);
 
 // I guess uchar is 1 byte, ushort is 2, uint is a full word, and doing "uchar something:n" is grab n bytes?
 typedef struct nopro_header {
@@ -29,24 +29,39 @@ typedef struct ip_header {
     unsigned short ipcheck;
     unsigned char ipsourceaddr[4];
     unsigned char ipdestaddr[4];
-    unsigned short ipsourceport;
-    unsigned short ipdestport;
-    unsigned int ipseq;
-    unsigned int ipack; // and then more, but bored of detailing it
 }   IP_HDR;
+typedef struct tcp_header {
+	unsigned short tcpsourceport;
+	unsigned short tcpdestport;
+	unsigned int tcpseq;
+	unsigned int tcpack;
+	unsigned char tcplen;
+	unsigned char tcpflags;
+	unsigned short tcpwindow;
+	unsigned short tcpcheck;
+	unsigned short tcpurg;
+} TCP_HDR;
+typedef struct udp_header {
+	unsigned short udpsourceport;
+	unsigned short udpdestport;
+	unsigned short udplen;
+	unsigned short udpcheck;
+} UDP_HDR;
 
 NOPRO_HDR *noprohdr;
 ETHER_HDR *ethhdr;
 IP_HDR *iphdr;
+TCP_HDR *tcphdr;
+UDP_HDR *udphdr;
 u_char *data;
 
 int main() {
 //	printf("PID: %d\n\n",getpid());
-	unsigned char FinalPacket[5000];
+	//unsigned char FinalPacket[5000];
 	pcap_t *fp;
-	const u_char *packet;
+	int packet;
 	struct pcap_pkthdr *header;
-	u_char *pkt_data;
+	const unsigned char *pkt_data;
 	u_int i, inum ;
 	char errbuf[PCAP_ERRBUF_SIZE];
 	pcap_if_t *alldevs, *d;
@@ -92,7 +107,7 @@ int main() {
 	return 0;
 }
 
-void ProcessPacket(u_char* Buffer, int Size) {
+void ProcessPacket(const unsigned char* Buffer, int Size) {
     //Ethernet header
     ethhdr = (ETHER_HDR *)Buffer;
     printf("-----------------------\nEthertype: %04x", ntohs(ethhdr->type));
@@ -110,14 +125,7 @@ void ProcessPacket(u_char* Buffer, int Size) {
     	printf("\n");
     }
 }
-void PrintData (u_char* data , int Size) { //    Print the hex values of the data
-    //shift_right(data, Size, 5);
-	/*int i;
-	i = 0;
-	for (;i < Size;i++) {
-		printf("%02x ", data[i]);
-	}
-	printf("\n");*/
+void PrintData (const unsigned char* data , int Size) { //    Print the hex values of the data
 	iphdr = (IP_HDR *)data;
 	printf("Ver %d Hlen %d TOS %02x Len %d ID %04x Frag %04x TTL %d Proto %d ",
 			iphdr->ipvh >> 4,
@@ -170,12 +178,45 @@ void PrintData (u_char* data , int Size) { //    Print the hex values of the dat
 		    printf("Other\n");
             break;
         }
-	printf("SrcIP %d.%d.%d.%d DstIP %d.%d.%d.%d SrcPort %d DstPort %d\nSeq %08x Ack %08x\n",
+	printf("SrcIP %d.%d.%d.%d DstIP %d.%d.%d.%d\n",
 			iphdr->ipsourceaddr[0],iphdr->ipsourceaddr[1],iphdr->ipsourceaddr[2],iphdr->ipsourceaddr[3],
-			iphdr->ipdestaddr[0],iphdr->ipdestaddr[1],iphdr->ipdestaddr[2],iphdr->ipdestaddr[3],
-			ntohs(iphdr->ipsourceport),
-			ntohs(iphdr->ipdestport),
-			ntohl(iphdr->ipseq),
-			ntohl(iphdr->ipack));
+			iphdr->ipdestaddr[0],iphdr->ipdestaddr[1],iphdr->ipdestaddr[2],iphdr->ipdestaddr[3]);
+	data = (data + ((iphdr->ipvh & 0x0f) * 4)); // skip ahead header length bytes
+	Size -= ((iphdr->ipvh & 0x0f) * 4);
+	if (iphdr->ipproto == 6) {
+		tcphdr = (TCP_HDR *)data;
+		printf("SrcPort %d DstPort %d\nSeq %08x Ack %08x Len %d Flags %d\nWindow %04x Urg %04x\n",
+				ntohs(tcphdr->tcpsourceport),
+				ntohs(tcphdr->tcpdestport),
+				ntohl(tcphdr->tcpseq),
+				ntohl(tcphdr->tcpack),
+				(tcphdr->tcplen >> 4) * 4,
+				(tcphdr->tcpflags & 0x3f),
+				ntohs(tcphdr->tcpwindow),
+				ntohs(tcphdr->tcpurg));
+		data = (data + ((tcphdr->tcplen >> 4) * 4));
+		Size -= ((tcphdr->tcplen >> 4) * 4);
+	}
+	else if (iphdr->ipproto == 17) {
+		udphdr = (UDP_HDR *)data;
+		printf("SrcPort %d DstPort %d Len %d\n",
+				ntohs(udphdr->udpsourceport),
+				ntohs(udphdr->udpdestport),
+				ntohs(udphdr->udplen));
+		data = (data + 8);
+		Size -= 8;
+	}
+	int i;
+	i = 0;
+	int InstructionLen;
+	for (;i < Size;i++) {
+		if (data[i] < 0x20 || data[i] == 0xff) {
+			printf(".");
+		}
+		else {
+			printf("%c", data[i]);
+		}
+	}
+	printf("\n");
 }
 
