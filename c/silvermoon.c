@@ -5,18 +5,23 @@
  
 #include "stdio.h"
 #include "stdlib.h"
+#include "string.h"
+
+#ifdef defined(_WIN32) || defined(WIN32)
 #include "winsock2.h"   //need winsock for inet_ntoa and ntohs methods
-#define HAVE_REMOTE
-#include "pcap.h"   //Winpcap :)
 #pragma comment(lib , "ws2_32.lib") //For winsock
 #pragma comment(lib , "wpcap.lib") //For winpcap
+#endif
+
+#define HAVE_REMOTE
+#include "pcap.h"   //Winpcap :)
 #define B64_DEF_LINE_SIZE   72
 #define B64_MIN_LINE_SIZE    4
 #define N               16
 // gcc -g silvermoon.c -o silvermoon.exe -lws2_32 -lwpcap
-void ProcessPacket (u_char* , int);
-void print_ethernet_header (u_char*);
-void PrintData (u_char* , int);
+void ProcessPacket (unsigned char*, int);
+void print_ethernet_header (unsigned char*);
+void PrintData (unsigned char*, int);
 unsigned char FinalPacket[5000];
 pcap_t *fp;
 static void debugstring(unsigned char *ar, int size) {
@@ -105,7 +110,7 @@ void SendPacket(int packetlen) {
     //pcap_t* t;
     //t = pcap_open(Device->name,100,PCAP_OPENFLAG_PROMISCUOUS,20,NULL,Error);
     //pcap_sendpacket(t,FinalPacket,UserDataLen + 42);
-    //pcap_sendpacket(t,FinalPacket,strlen(FinalPacket));
+    //pcap_sendpacket(t,FinalPacket,strlen((const char *)FinalPacket));
     pcap_sendpacket(fp,FinalPacket,packetlen);
     //pcap_close(t); // we dont close now, because we are still listening on it concurrently, i hope
 }
@@ -637,7 +642,7 @@ static void encode(unsigned char *ar, int size) {
     result[k] = '\0';
     int copyover;
     int resultlen;
-    resultlen = strlen(result);
+    resultlen = strlen((const char *)result);
     for (copyover = 0; copyover < resultlen; copyover++) {
 		if (result[copyover] == '=') {
 			ar[copyover] = '\0';
@@ -712,7 +717,7 @@ static int decode(unsigned char *ar, int size) { // handles unb64, then blowfish
 		while(fgets(bfr,50000,fp) != NULL){
 			int sure;
 			int bfrlen;
-			bfrlen = strlen(bfr);
+			bfrlen = strlen((const char *)bfr);
 			for (sure = 0; sure < bfrlen; sure++) {
 				message[messagebuilder] = bfr[sure];
 				messagebuilder++;
@@ -754,7 +759,7 @@ static int decode(unsigned char *ar, int size) { // handles unb64, then blowfish
 			}
 			//----printf("\nPREENCEND\n");
 			encode(messagechunk, chunker);
-			//----debugstring(messagechunk,strlen(messagechunk));
+			//----debugstring(messagechunk,strlen((const char *)messagechunk));
 			if (((mtuchunk + 1) * 896) < messagebuilder) {
 				commandcode[0] = '\xF7'; // 7 is our messagebuffer command, F gets chopped off later, we use F so that polo[0] isn't null later
 				commandcode[1] = '\0'; // 7 is our messagebuffer command, F gets chopped off later, we use F so that polo[0] isn't null later
@@ -768,19 +773,19 @@ static int decode(unsigned char *ar, int size) { // handles unb64, then blowfish
 			int currstringlen;
 			int poloiterator;
 			// add commandcode
-			currstringlen = strlen(commandcode);
+			currstringlen = strlen((const char *)commandcode);
 			for (poloiterator = 0; poloiterator < currstringlen; poloiterator++) {
 				polo[shiftprep] = commandcode[poloiterator];
 				shiftprep++;
 			}
 			// add nick
-			currstringlen = strlen(nick);
+			currstringlen = strlen((const char *)nick);
 			for (poloiterator = 0; poloiterator < currstringlen; poloiterator++) {
 				polo[shiftprep] = nick[poloiterator];
 				shiftprep++;
 			}
 			// add tripcode
-			currstringlen = strlen(tripcode);
+			currstringlen = strlen((const char *)tripcode);
 			polo[shiftprep] = ' ';
 			shiftprep++;
 			polo[shiftprep] = '[';
@@ -794,13 +799,13 @@ static int decode(unsigned char *ar, int size) { // handles unb64, then blowfish
 			polo[shiftprep] = ' ';
 			shiftprep++;
 			// add message
-			currstringlen = strlen(messagechunk);
+			currstringlen = strlen((const char *)messagechunk);
 			for (poloiterator = 0; poloiterator < currstringlen; poloiterator++) {
 				polo[shiftprep] = messagechunk[poloiterator];
 				shiftprep++;
 			}
 			// add lineterminator
-			currstringlen = strlen(lineterminator);
+			currstringlen = strlen((const char *)lineterminator);
 			for (poloiterator = 0; poloiterator < currstringlen; poloiterator++) {
 				polo[shiftprep] = lineterminator[poloiterator];
 				shiftprep++;
@@ -888,7 +893,7 @@ void strip_nick_trip(unsigned char *ar, int size) {
             last = next;                       // Remember the old carry for next time.
         }
 	ar[messageoffset] = '\0';
-	//-----printf("I: %d Nick: %s (%d) Tripcode: %s (%d) Message: %s (%d)\n", i, nick, strlen(nick), tripcode, strlen(tripcode), ar, strlen(ar));
+	//-----printf("I: %d Nick: %s (%d) Tripcode: %s (%d) Message: %s (%d)\n", i, nick, strlen((const char *)nick), tripcode, strlen((const char *)tripcode), ar, strlen((const char *)ar));
 }
 
 
@@ -897,15 +902,13 @@ typedef struct nopro_header {
     unsigned char nopro_command;
 }   NOPRO_HDR;
 typedef struct ethernet_header {
-    UCHAR dest[6];
-    UCHAR source[6];
-    USHORT type;
-}   ETHER_HDR , *PETHER_HDR , FAR * LPETHER_HDR , ETHERHeader; // I don't think anything beyond ETHER_HDR is referenced again, we can probably remove
- 
-
+    unsigned char dest[6];
+    unsigned char source[6];
+    unsigned short type;
+}   ETHER_HDR; // I don't think anything beyond ETHER_HDR is referenced again, we can probably remove
  
 int tcp=0,udp=0,icmp=0,others=0,igmp=0,total=0,i,j;
-struct sockaddr_in source,dest;
+//struct sockaddr_in source,dest;
 char hex[2];
 //Its free!
 NOPRO_HDR *noprohdr;
@@ -913,22 +916,23 @@ ETHER_HDR *ethhdr;
 u_char *data;
 
 int main() {
-	printf("PID: %d\n\n",getpid());
+	//printf("PID: %d\n\n",getpid());
 	unsigned long L = 1, R = 2;
 	BLOWFISH_CTX ctx;
 	Blowfish_Init (&ctx, (unsigned char*)"allcalma", 8);
 	Blowfish_Encrypt(&ctx, &L, &R);
 	Blowfish_Decrypt(&ctx, &L, &R);
-	u_int i, res , inum ;
-	u_char errbuf[PCAP_ERRBUF_SIZE], buffer[100];
-	u_char *pkt_data;
+	unsigned int i, inum;
+	int res;
+	char errbuf[PCAP_ERRBUF_SIZE], buffer[100];
+	unsigned char *pkt_data;
 	time_t seconds;
 	struct tm tbreak;
 	pcap_if_t *alldevs, *d;
 	struct pcap_pkthdr *header;
  
     /* The user didn't provide a packet source: Retrieve the local device list */
-    if (pcap_findalldevs_ex(PCAP_SRC_IF_STRING, NULL, &alldevs, errbuf) == -1) {
+    if (pcap_findalldevs(&alldevs, errbuf) == -1) {
         fprintf(stderr,"Error in pcap_findalldevs_ex: %s\n", errbuf);
         return -1;
     }
@@ -939,7 +943,7 @@ int main() {
         //printf("%d. %s\n    ", ++i, d->name);
         if (d->description) {
 		int adapt;
-		adapt = strlen(d->description);
+		adapt = strlen((const char *)d->description);
 		if (d->description[16] == '\'' && d->description[adapt - 15] == '\'') {
 			printf("%d. ",++i);
 			int bob;
@@ -969,14 +973,7 @@ int main() {
     printf("\nEnter the interface number you would like to sniff: ");
     scanf("%d" , &inum);
     for (d = alldevs, i = 0; i < inum - 1; d = d->next, i++); // Jump to the selected adapter
-    if ((fp = pcap_open(d->name, // Open the device
-                        65535, // snaplen
-                        PCAP_OPENFLAG_PROMISCUOUS, // flags
-                        20, // read timeout
-                        NULL, // remote authentication
-                        errbuf)
-                        ) == NULL)
-    {
+    if ((fp = pcap_open_live(d->name, 4096, 1, 1000, errbuf)) == NULL) {
         fprintf(stderr,"\nError opening adapter\n");
         return -1;
     }
@@ -1001,7 +998,7 @@ int main() {
     return 0;
 }
  
-void ProcessPacket(u_char* Buffer, int Size) {
+void ProcessPacket(unsigned char* Buffer, int Size) {
     //Ethernet header
     ethhdr = (ETHER_HDR *)Buffer;
     ++total;
@@ -1013,14 +1010,14 @@ void ProcessPacket(u_char* Buffer, int Size) {
 	    PrintData(Buffer , Size);
     }
 }
-void PrintData (u_char* data , int Size) { //    Print the hex values of the data
+void PrintData (unsigned char* data , int Size) { //    Print the hex values of the data
     shift_right(data, Size, 5);
     noprohdr = (NOPRO_HDR *)data;
 	switch (noprohdr->nopro_command) { //"","^jn]","^kl]","^qt]","^fl]","^rq]","^ss]","^sr]"
             case 0: //Message
 		//printf("c: Message\n");
 		strip_nick_trip(data, Size);
-		decode(data, strlen(data));
+		decode(data, strlen((const char *)data));
             break;
 
             case 1: //Join
@@ -1050,7 +1047,7 @@ void PrintData (u_char* data , int Size) { //    Print the hex values of the dat
             case 7: //Message Buffer
 		//printf("c: Message Buffer\n");
 		strip_nick_trip(data, Size);
-		decode(data, strlen(data));
+		decode(data, strlen((const char *)data));
             break;
  
             default:
@@ -1070,7 +1067,7 @@ void PrintData (u_char* data , int Size) { //    Print the hex values of the dat
         if( (i!=0 && (i+1)%12==0) || i == Size - 1) { //if last character of a line , then print the line - 12 characters in 1 line
             line[i%12 + 1] = '\0';
             printf("      ");  //print a big gap of 10 characters between hex and characters
-            for( j = strlen(line) ; j < 12; j++) { //Print additional spaces for last lines which might be less than 16 characters in length
+            for( j = strlen((const char *)line) ; j < 12; j++) { //Print additional spaces for last lines which might be less than 16 characters in length
                 printf("   ");
             }
             printf("%s \n" , line);

@@ -62,7 +62,7 @@ int main() {
 	int packet;
 	struct pcap_pkthdr *header;
 	const unsigned char *pkt_data;
-	u_int i, inum ;
+	unsigned int i, inum ;
 	char errbuf[PCAP_ERRBUF_SIZE];
 	pcap_if_t *alldevs, *d;
 	if (pcap_findalldevs(&alldevs, errbuf) == -1) {

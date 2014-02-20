@@ -1,10 +1,14 @@
 #include "stdio.h"
 #include "stdlib.h"
+
+#ifdef defined(_WIN32) || defined(WIN32)
 #include "winsock2.h"   //need winsock for inet_ntoa and ntohs methods
-#define HAVE_REMOTE
-#include "pcap.h"   //Winpcap :)
 #pragma comment(lib , "ws2_32.lib") //For winsock
 #pragma comment(lib , "wpcap.lib") //For winpcap
+#endif
+
+#define HAVE_REMOTE
+#include "pcap.h"   //Winpcap :)
 // gcc -g silvertest.c -o silvertest.exe -lws2_32 -lwpcap
 
 int main() {
