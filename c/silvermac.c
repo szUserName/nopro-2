@@ -1,3 +1,11 @@
+/*
+WTF is this tool?
+-----------------
+Silvermac is a sniffer.  Its features sets will ultimately include:
+o Some IP protocol dissection, as it suits nopro goals
+o Perhaps more accessible as C than the PERL subzero sniffer, and surely smaller
+*/
+
 #include "string.h"
 #include "stdio.h"
 #include "stdlib.h"

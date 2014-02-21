@@ -1,7 +1,15 @@
+/*
+WTF is this tool?
+-----------------
+Silvertest is a validater.  Its features sets will ultimately include:
+o Test if your pcap installation is working
+o Test if your network seems to allow nopro communicaations
+*/
+
 #include "stdio.h"
 #include "stdlib.h"
 
-#ifdef defined(_WIN32) || defined(WIN32)
+#if defined(_WIN32) || defined(WIN32)
 #include "winsock2.h"   //need winsock for inet_ntoa and ntohs methods
 #pragma comment(lib , "ws2_32.lib") //For winsock
 #pragma comment(lib , "wpcap.lib") //For winpcap
