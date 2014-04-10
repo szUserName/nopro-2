@@ -1,0 +1,12 @@
+C:\Users\Valued Customer\AppData\Local\Temporary Projects\ConsoleApplication1\obj\Release\ResolveAssemblyReference.cache
+C:\Users\Valued Customer\AppData\Local\Temporary Projects\ConsoleApplication1\bin\Release\Interop.SHDocVw.dll
+C:\Users\Valued Customer\AppData\Local\Temporary Projects\ConsoleApplication1\obj\Release\Interop.SHDocVw.dll
+C:\Users\Valued Customer\AppData\Local\Temporary Projects\ConsoleApplication1\obj\Release\ConsoleApplication1.csproj.ResolveComReference.cache
+C:\Users\Valued Customer\AppData\Local\Temporary Projects\ConsoleApplication1\bin\Release\Comb64.exe.manifest
+C:\Users\Valued Customer\AppData\Local\Temporary Projects\ConsoleApplication1\bin\Release\Comb64.application
+C:\Users\Valued Customer\AppData\Local\Temporary Projects\ConsoleApplication1\bin\Release\Comb64.exe
+C:\Users\Valued Customer\AppData\Local\Temporary Projects\ConsoleApplication1\bin\Release\Comb64.pdb
+C:\Users\Valued Customer\AppData\Local\Temporary Projects\ConsoleApplication1\obj\Release\Comb64.exe.manifest
+C:\Users\Valued Customer\AppData\Local\Temporary Projects\ConsoleApplication1\obj\Release\Comb64.application
+C:\Users\Valued Customer\AppData\Local\Temporary Projects\ConsoleApplication1\obj\Release\Comb64.exe
+C:\Users\Valued Customer\AppData\Local\Temporary Projects\ConsoleApplication1\obj\Release\Comb64.pdb

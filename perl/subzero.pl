@@ -875,7 +875,7 @@ OUI: 00000C PID: 0128 Unassigned
 0000015A : 00 00 00 00 00 00 00                 .......
 
 
-MAC SRC:001E139E9200 MAC DEST:AB0000020000
+MAC SRC:001E139E9200 MAC DEST:AB0000020000 <- B is odd, so broadcast
 Network Layer Protocol: 6002 DEC Maintenance Operation Protocol (MOP) Remote Console
 3d 00 07 00 00 00 01 00 03 03 00 00 <- 3d means length 61, 07 is the SID (system ID, i think) (The MOP server supports the request ID message, periodic system ID messages, and the remote console carrier functions.)
 02 00 02 21 00 03 00 06 00 00 00 00
