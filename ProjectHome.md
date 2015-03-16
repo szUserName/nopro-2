@@ -1,0 +1,1 @@
+Non-protocol variable communications within a collision domain.
